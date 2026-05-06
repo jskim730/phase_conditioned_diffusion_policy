@@ -216,3 +216,73 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# =========================
+# Project-specific ignores
+# =========================
+
+# Colab / Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Google Drive / local paths
+drive/
+MyDrive/
+content/
+.local/
+
+# Dataset / rollout files
+data/
+datasets/
+rollouts/
+processed_data/
+raw_data/
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.hdf5
+*.h5
+*.csv
+
+# Model checkpoints / weights
+checkpoints/
+weights/
+models/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Training outputs / logs
+outputs/
+results/
+runs/
+logs/
+wandb/
+tensorboard/
+events.out.tfevents.*
+
+# MuJoCo / RL temporary outputs
+videos/
+monitor/
+*.mp4
+*.gif
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

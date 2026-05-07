@@ -229,7 +229,7 @@ EXPERIMENT_CONFIGS: dict[VariantName, ExperimentConfig] = {
         data=_BASE_DATA,
         model=_BASE_MODEL,
         diffusion=_BASE_DIFFUSION,
-        training=_BASE_TRAINING,
+        training=replace(_BASE_TRAINING, num_epochs=100),
         evaluation=_BASE_EVALUATION,
         artifacts=ArtifactConfig(
             checkpoint_name="vanilla_dp_ckpt.pt",

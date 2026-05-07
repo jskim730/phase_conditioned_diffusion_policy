@@ -32,6 +32,14 @@ def resolve_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def setup_reproducibility(seed: int, deterministic: bool = False) -> str:
+    """Seed all RNGs, resolve the torch device, and print the legacy setup summary."""
+    seed = set_global_seed(seed, deterministic=deterministic)
+    device = resolve_device()
+    print(f"PyTorch {torch.__version__}, device={device}, seed={seed}")
+    return device
+
+
 def print_data_summary(data: dict[str, Any]) -> None:
     """Print the dataset dimensions and phase-frequency window used by all runs."""
     print(f"OBS_DIM={data['OBS_DIM']}, ACT_DIM={data['ACT_DIM']}")

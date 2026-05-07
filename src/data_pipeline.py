@@ -7,15 +7,16 @@ steps so downstream notebooks and tests use the same implementation.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 
 from dataset import build_loaders
+from reproducibility import setup_reproducibility
 
 
 @dataclass(frozen=True)
@@ -33,13 +34,14 @@ class DataPipelineConfig:
 
 
 def set_reproducibility(seed: int = 42) -> str:
-    """Seed NumPy/PyTorch and return the active torch device string."""
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"PyTorch {torch.__version__}, device={device}, seed={seed}")
-    return device
+    """Deprecated compatibility wrapper for :func:`reproducibility.setup_reproducibility`."""
+    warnings.warn(
+        "data_pipeline.set_reproducibility is deprecated; "
+        "use reproducibility.setup_reproducibility instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return setup_reproducibility(seed)
 
 
 def load_demo_artifact(data_path: str | Path) -> dict[str, Any]:
@@ -175,7 +177,7 @@ def save_norm_stats(norm_stats: dict[str, np.ndarray], norm_path: str | Path) ->
 
 def run_data_pipeline(data_path: str | Path, norm_path: str | Path, config: DataPipelineConfig) -> dict[str, Any]:
     """Run loading, splitting, train-only stats, saving, and loader construction."""
-    set_reproducibility(config.seed)
+    setup_reproducibility(config.seed)
     data = load_demo_artifact(data_path)
     print(
         f"OBS_DIM={data['obs_data'].shape[-1]}, ACT_DIM={data['act_data'].shape[-1]}\n"

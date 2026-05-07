@@ -136,7 +136,7 @@ def _resolve_data_dir(data_dir: str | os.PathLike[str] | None = None) -> Path:
         return DATA_DIR
 
     candidate = Path(data_dir).expanduser().resolve()
-    direct_demos = candidate / 'demos_ant_planC.npz'
+    direct_demos = candidate / 'demos_ant.npz'
     direct_norm = candidate / 'norm_stats.npz'
     nested = candidate / 'data'
 
@@ -155,7 +155,7 @@ def load_project_data(data_dir: str | os.PathLike[str] | None = None):
     Returns dict with all variables Step 2+ notebooks expect.
     """
     data_dir = _resolve_data_dir(data_dir)
-    demos_path = data_dir / 'demos_ant_planC.npz'
+    demos_path = data_dir / 'demos_ant.npz'
     norm_path = data_dir / 'norm_stats.npz'
     assert demos_path.exists(), f"파일 없음: {demos_path}"
     assert norm_path.exists(),  f"파일 없음: {norm_path}"

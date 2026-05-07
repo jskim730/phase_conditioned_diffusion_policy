@@ -1,4 +1,4 @@
-"""Reusable evaluation routines for notebook 05.
+"""Official evaluation orchestration routines for notebook 05.
 
 The evaluation notebook should only orchestrate these functions.  Model loading,
 rollout protocol construction, frequency/phase sweeps, tabulation, and result
@@ -146,6 +146,56 @@ def _spec_from_loaded(loaded: LoadedEvalModel, *, label: str, uses_phase: bool) 
     )
 
 
+def evaluate_model_spec_at_frequency(
+    spec: ModelEvalSpec,
+    *,
+    freq_hz: float,
+    env,
+    data: Mapping[str, object],
+    device: str,
+    noise_scheduler_config: Mapping[str, object],
+    num_inference_steps: int,
+    n_seeds: int,
+    max_steps: int,
+    dt: float = 0.05,
+    phase0: float = 0.0,
+    deterministic_sampling: bool = True,
+) -> list[dict]:
+    """Run one model spec at one target frequency/phase-offset combination.
+
+    This is the single-model evaluation helper used by both the official
+    evaluation orchestration in this module and compatibility wrappers in
+    training-oriented modules.  Keep the ``rollout_multi_seed`` argument
+    assembly here so rollout protocol changes have one source of truth.
+    """
+    phase_fn = None
+    if spec.uses_phase_trajectory:
+        phase_fn = make_phase_trajectory_fn(freq_hz, dt=dt, phase0=phase0)
+
+    return rollout_multi_seed(
+        spec.model,
+        spec.ema,
+        env,
+        n_seeds=n_seeds,
+        deterministic_sampling=deterministic_sampling,
+        noise_scheduler_config=dict(noise_scheduler_config),
+        obs_mean=data["obs_mean"],
+        obs_std=data["obs_std"],
+        act_min=data["act_min"],
+        act_range=data["act_range"],
+        cond_fn=spec.cond_fn,
+        obs_horizon=data["OBS_HORIZON"],
+        pred_horizon=data["PRED_HORIZON"],
+        action_horizon=data["ACTION_HORIZON"],
+        obs_dim=data["OBS_DIM"],
+        act_dim=data["ACT_DIM"],
+        num_inference_steps=num_inference_steps,
+        max_steps=max_steps,
+        phase_trajectory_fn=phase_fn,
+        device=device,
+    )
+
+
 def evaluate_model_at_frequency(
     state: EvaluationState,
     model_key: str,
@@ -160,33 +210,20 @@ def evaluate_model_at_frequency(
     phase0: float = 0.0,
     deterministic_sampling: bool = True,
 ) -> list[dict]:
-    """Run one model at one target frequency/phase-offset combination."""
-    spec = state.model_specs[model_key]
-    phase_fn = None
-    if spec.uses_phase_trajectory:
-        phase_fn = make_phase_trajectory_fn(freq_hz, dt=dt, phase0=phase0)
-
-    return rollout_multi_seed(
-        spec.model,
-        spec.ema,
-        env,
-        n_seeds=n_seeds,
-        deterministic_sampling=deterministic_sampling,
-        noise_scheduler_config=state.noise_scheduler_config,
-        obs_mean=data["obs_mean"],
-        obs_std=data["obs_std"],
-        act_min=data["act_min"],
-        act_range=data["act_range"],
-        cond_fn=spec.cond_fn,
-        obs_horizon=data["OBS_HORIZON"],
-        pred_horizon=data["PRED_HORIZON"],
-        action_horizon=data["ACTION_HORIZON"],
-        obs_dim=data["OBS_DIM"],
-        act_dim=data["ACT_DIM"],
-        num_inference_steps=state.num_inference_steps,
-        max_steps=max_steps,
-        phase_trajectory_fn=phase_fn,
+    """Run one registered model at one target frequency/phase-offset combination."""
+    return evaluate_model_spec_at_frequency(
+        state.model_specs[model_key],
+        freq_hz=freq_hz,
+        env=env,
+        data=data,
         device=device,
+        noise_scheduler_config=state.noise_scheduler_config,
+        num_inference_steps=state.num_inference_steps,
+        n_seeds=n_seeds,
+        max_steps=max_steps,
+        dt=dt,
+        phase0=phase0,
+        deterministic_sampling=deterministic_sampling,
     )
 
 
@@ -249,6 +286,7 @@ def run_frequency_sweep_evaluation(
     n_seeds: int,
     max_steps: int,
     dt: float = 0.05,
+    deterministic_sampling: bool = True,
 ) -> dict[str, dict[float, list[dict]]]:
     """Run target-frequency controllability sweeps for phase-conditioned models."""
     all_results: dict[str, dict[float, list[dict]]] = {}
@@ -270,6 +308,7 @@ def run_frequency_sweep_evaluation(
                 n_seeds=n_seeds,
                 max_steps=max_steps,
                 dt=dt,
+                deterministic_sampling=deterministic_sampling,
             )
         print(f"\n{state.model_specs[model_key].label} sweep 시간: {(time.time() - t0) / 60:.1f} min\n")
         all_results[model_key] = model_results

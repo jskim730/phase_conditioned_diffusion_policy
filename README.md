@@ -66,6 +66,7 @@ Ant locomotion 환경에서 **Diffusion Policy**를 학습하고, 보행 주기 
 ```text
 phase_conditioned_diffusion_policy/
 ├── README.md
+├── requirements.txt
 ├── notebooks/
 │   ├── 00_data_extraction.ipynb
 │   ├── 01_data_pipeline.ipynb
@@ -91,7 +92,19 @@ phase_conditioned_diffusion_policy/
 
 ---
 
-## 5. 데이터와 artifact 위치
+## 5. 환경 설정
+
+프로젝트 공통 Python 의존성은 repository root의 `requirements.txt`에서 한 번에 관리합니다. 새 Colab/로컬 런타임에서는 아래 명령으로 동일한 패키지 세트를 설치합니다.
+
+```bash
+pip install -r requirements.txt
+```
+
+Colab에서 Google Drive의 `PROJECT_DIR` 구조를 사용하는 학습/평가 노트북은 `requirements.txt`도 함께 Drive project directory에 복사되어 있다고 가정합니다. MuJoCo 렌더링에 필요한 system package 설치는 `00_data_extraction.ipynb`의 setup cell에서 별도로 유지합니다.
+
+---
+
+## 6. 데이터와 artifact 위치
 
 노트북은 기본적으로 Google Drive의 아래 디렉터리를 project directory로 사용합니다.
 
@@ -126,7 +139,7 @@ SRC_DIR = f'{PROJECT_DIR}/src'
 
 ---
 
-## 6. 데이터 구조와 horizon 설정
+## 7. 데이터 구조와 horizon 설정
 
 `AntPhaseDataset`은 episode 안의 valid 시점 `t`마다 아래 chunk를 만듭니다.
 
@@ -148,16 +161,16 @@ phase[t : t + pred_horizon]        → phase chunk
 
 ---
 
-## 7. 모델 설계
+## 8. 모델 설계
 
-### 7.1 Vanilla Diffusion Policy
+### 8.1 Vanilla Diffusion Policy
 
 - 입력 sample: noisy action chunk `(B, pred_horizon, act_dim)`
 - global condition: flattened observation window `(B, obs_horizon × obs_dim)`
 - 출력: predicted noise `ε̂`
 - 목적: phase 정보 없이 observation만으로 action distribution을 학습하는 baseline
 
-### 7.2 Periodic Phase Conditioning
+### 8.2 Periodic Phase Conditioning
 
 - Vanilla와 같은 `ConditionalUnet1D` architecture를 사용합니다.
 - 차이는 global condition에 chunk 첫 phase를 추가하는 것입니다.
@@ -168,7 +181,7 @@ global_cond = concat(flatten(obs_window), cos(φ₀), sin(φ₀))
 
 raw phase scalar를 그대로 넣지 않고 `(cos, sin)`으로 넣기 때문에 `0`과 `2π` 근처의 discontinuity를 줄입니다.
 
-### 7.3 Phase Trajectory Conditioning — main contribution
+### 8.3 Phase Trajectory Conditioning — main contribution
 
 - observation window는 global condition으로 유지합니다.
 - phase는 전체 chunk trajectory를 per-step condition으로 제공합니다.
@@ -186,7 +199,7 @@ per-step phase encoder는 zero-init으로 시작해 학습 초기에 기존 Diff
 
 ---
 
-## 8. 학습 방식
+## 9. 학습 방식
 
 공통 training loop는 `src/training.py`의 `train_diffusion_policy()`를 사용합니다.
 
@@ -210,7 +223,7 @@ per-step phase encoder는 zero-init으로 시작해 학습 초기에 기존 Diff
 
 ---
 
-## 9. Sampling과 rollout
+## 10. Sampling과 rollout
 
 `src/sampling.py`는 DDIM sampling으로 normalized action chunk를 생성합니다.
 
@@ -250,7 +263,7 @@ per-step phase encoder는 zero-init으로 시작해 학습 초기에 기존 Diff
 
 ### 11.1 Colab에서 실행
 
-각 notebook 상단은 Google Drive mount와 dependency install을 포함합니다.
+각 notebook 상단은 Google Drive mount와 `requirements.txt` 기반 dependency install을 포함합니다.
 
 ```python
 from google.colab import drive
@@ -275,17 +288,10 @@ SRC_DIR = f'{PROJECT_DIR}/src'
 
 ### 11.2 로컬에서 코드 확인
 
-이 repo 자체에는 Colab dependency lock file이 아직 없습니다. 최소한 아래 계열 dependency가 필요합니다.
+로컬 환경에서는 repository root에서 공통 dependency를 설치한 뒤 코드를 확인할 수 있습니다.
 
-```text
-numpy
-torch
-diffusers
-huggingface_hub
-gymnasium[mujoco]
-matplotlib
-imageio
-minari
+```bash
+pip install -r requirements.txt
 ```
 
 문법 확인은 다음처럼 할 수 있습니다.

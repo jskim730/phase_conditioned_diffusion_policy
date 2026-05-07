@@ -1,0 +1,18 @@
+# Core numerical and training stack
+numpy
+torch
+matplotlib
+
+# Diffusion Policy training utilities
+diffusers>=0.30,<0.32
+huggingface_hub>=0.23
+
+# Ant / MuJoCo environment and dataset tooling
+gymnasium[mujoco]
+mujoco
+minari
+
+# Demo extraction, signal processing, and visualization
+scipy
+imageio
+imageio-ffmpeg

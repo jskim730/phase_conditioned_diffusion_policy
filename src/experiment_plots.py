@@ -150,3 +150,71 @@ def print_step3_vs_step4_table(step3_sweep: dict[float, dict], step4_results: di
             left = f"{f3['survival_mean']:>10.0f} {f3['reward_mean']:>10.1f}±{f3['reward_std']:<4.1f}"
         right = f"{surv4.mean():>10.0f} {rew4.mean():>10.1f}±{rew4.std():<4.1f}"
         print(f"{freq_hz:7.3f} | {left} | {right}")
+
+
+def plot_evaluation_frequency_comparison(
+    table1_results: dict[str, list[dict]],
+    sweep_results: dict[str, dict[float, list[dict]]],
+    data: dict,
+    output_path: str | Path,
+    *,
+    n_seeds_sweep: int,
+) -> Path:
+    """Save the notebook-05 three-way survival/reward-vs-frequency figure."""
+    output_path = Path(output_path)
+    freqs = sorted(float(f) for f in sweep_results["periodic"].keys())
+
+    def means_stds(model_key: str, metric: str) -> tuple[list[float], list[float]]:
+        means = [float(np.mean([r[metric] for r in sweep_results[model_key][f]])) for f in freqs]
+        stds = [float(np.std([r[metric] for r in sweep_results[model_key][f]])) for f in freqs]
+        return means, stds
+
+    p_surv, p_surv_std = means_stds("periodic", "survival")
+    p_rew, p_rew_std = means_stds("periodic", "total_reward")
+    t_surv, t_surv_std = means_stds("trajectory", "survival")
+    t_rew, t_rew_std = means_stds("trajectory", "total_reward")
+    v_surv = np.array([r["survival"] for r in table1_results["vanilla"]])
+    v_rew = np.array([r["total_reward"] for r in table1_results["vanilla"]])
+
+    f_mean = float(data["freq_window_mean"])
+    f_min = float(data["freq_window_min"])
+    f_max = float(data["freq_window_max"])
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+    ax = axes[0]
+    ax.errorbar(freqs, p_surv, yerr=p_surv_std, fmt="s-", capsize=4, linewidth=1.8,
+                markersize=7, color="tab:green", label="Periodic Phase")
+    ax.errorbar(freqs, t_surv, yerr=t_surv_std, fmt="o-", capsize=4, linewidth=2.2,
+                markersize=8, color="tab:red", label="Trajectory (ours)")
+    ax.errorbar([f_mean], [v_surv.mean()], yerr=[v_surv.std()], fmt="D", capsize=5,
+                markersize=10, color="tab:blue", label="Vanilla (no phase, ref. only)")
+    ax.axvspan(f_min, f_max, alpha=0.12, color="green", label="In-dist range")
+    ax.axvline(f_mean, color="gray", ls="--", alpha=0.4)
+    ax.set_xlabel("Sampling-time phase freq (Hz)")
+    ax.set_ylabel("Survival (steps)")
+    ax.set_title(f"Survival vs Frequency (5 in-dist + 4 OOD, n={n_seeds_sweep})")
+    ax.legend(loc="lower center", fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(-50, 1080)
+
+    ax = axes[1]
+    ax.errorbar(freqs, p_rew, yerr=p_rew_std, fmt="s-", capsize=4, linewidth=1.8,
+                markersize=7, color="tab:green", label="Periodic Phase")
+    ax.errorbar(freqs, t_rew, yerr=t_rew_std, fmt="o-", capsize=4, linewidth=2.2,
+                markersize=8, color="tab:red", label="Trajectory (ours)")
+    ax.errorbar([f_mean], [v_rew.mean()], yerr=[v_rew.std()], fmt="D", capsize=5,
+                markersize=10, color="tab:blue", label="Vanilla (no phase, ref. only)")
+    ax.axvspan(f_min, f_max, alpha=0.12, color="green", label="In-dist range")
+    ax.axvline(f_mean, color="gray", ls="--", alpha=0.4)
+    ax.set_xlabel("Sampling-time phase freq (Hz)")
+    ax.set_ylabel("Total reward")
+    ax.set_title(f"Reward vs Frequency (5 in-dist + 4 OOD, n={n_seeds_sweep})")
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    plt.show()
+    print(f"✓ {output_path}")
+    return output_path

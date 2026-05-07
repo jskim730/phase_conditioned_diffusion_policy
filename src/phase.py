@@ -76,12 +76,18 @@ def legacy_periodic_sweep_frequencies(data: dict) -> np.ndarray:
     )
 
 
-def frequency_zone(freq_hz: float, data: dict) -> str:
-    """Classify a target frequency relative to the training frequency support."""
+def frequency_zone(freq_hz: float, data: dict, *, atol: float = 1e-6) -> str:
+    """Classify a target frequency relative to the training frequency support.
+
+    The sweep grid is usually stored as ``float32`` for compact artifacts, so
+    boundary values can round a few ULPs outside the ``float64`` dataset stats.
+    A small absolute tolerance keeps exact min/max grid points in-distribution.
+    """
     _, f_min, f_max = training_frequency_triplet(data)
-    if f_min <= float(freq_hz) <= f_max:
+    freq = float(freq_hz)
+    if (f_min - atol) <= freq <= (f_max + atol):
         return "in-dist"
-    return "OOD-low" if float(freq_hz) < f_min else "OOD-high"
+    return "OOD-low" if freq < f_min else "OOD-high"
 
 
 @dataclass(frozen=True)

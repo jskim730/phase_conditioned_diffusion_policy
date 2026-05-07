@@ -11,8 +11,11 @@ Original file is located at
 AntPhaseDataset — chunked dataset for Phase-Conditioned Diffusion Policy.
 
 Step 1 (data_pipeline) 과 Step 2+ (학습/평가) 모두에서 사용.
-정규화 함수 + Dataset 클래스 + Drive에서 데이터 로드하는 헬퍼 한 묶음.
+정규화 함수 + Dataset 클래스 + artifact data directory에서 데이터 로드하는 헬퍼 한 묶음.
 """
+
+import os
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -132,19 +135,39 @@ class AntPhaseDataset(Dataset):
 
 
 # =====================================================================
-# Drive 데이터 로드 헬퍼 — 모든 step 노트북의 첫 셀에서 사용
+# Artifact 데이터 로드 헬퍼 — 모든 step 노트북의 첫 셀에서 사용
 # =====================================================================
 
-def load_project_data(project_dir: str):
-    """Drive에서 demos + norm_stats를 한 번에 로드.
+def _resolve_data_dir(data_dir: str | os.PathLike[str] | None = None) -> Path:
+    """Return the directory containing demo and normalization artifacts."""
+    if data_dir is None:
+        from paths import DATA_DIR
+        return DATA_DIR
+
+    candidate = Path(data_dir).expanduser().resolve()
+    direct_demos = candidate / 'demos_ant_planC.npz'
+    direct_norm = candidate / 'norm_stats.npz'
+    nested = candidate / 'data'
+
+    if not (direct_demos.exists() and direct_norm.exists()) and nested.exists():
+        return nested
+    return candidate
+
+
+def load_project_data(data_dir: str | os.PathLike[str] | None = None):
+    """Load demos + norm_stats from the artifact data directory.
+
+    ``data_dir`` defaults to ``paths.DATA_DIR``.  Passing an artifact root from
+    older notebooks is also supported: when files are not found directly under
+    that path but ``<root>/data`` exists, the nested data directory is used.
 
     Returns dict with all variables Step 2+ notebooks expect.
     """
-    import os
-    demos_path = os.path.join(project_dir, 'demos_ant_planC.npz')
-    norm_path  = os.path.join(project_dir, 'norm_stats.npz')
-    assert os.path.exists(demos_path), f"파일 없음: {demos_path}"
-    assert os.path.exists(norm_path),  f"파일 없음: {norm_path}"
+    data_dir = _resolve_data_dir(data_dir)
+    demos_path = data_dir / 'demos_ant_planC.npz'
+    norm_path = data_dir / 'norm_stats.npz'
+    assert demos_path.exists(), f"파일 없음: {demos_path}"
+    assert norm_path.exists(),  f"파일 없음: {norm_path}"
 
     demos = np.load(demos_path)
     norm  = np.load(norm_path)

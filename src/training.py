@@ -17,6 +17,8 @@ condition으로 뽑는지만 callable로 바꿈.
 """
 
 import time
+from pathlib import Path
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -203,9 +205,11 @@ def train_diffusion_policy(
 # Checkpoint helpers
 # =====================================================================
 
-def save_checkpoint(path: str, model, ema, train_losses, val_log,
+def save_checkpoint(path: str | Path, model, ema, train_losses, val_log,
                     best_ema_state=None, config: Optional[dict] = None):
-    """Drive에 학습 결과 저장."""
+    """Save a training checkpoint under the user artifact workspace."""
+    path = Path(path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
     ckpt = {
         'model_state_dict': model.state_dict(),
         'ema_state_dict':   ema.state_dict(),
@@ -215,11 +219,10 @@ def save_checkpoint(path: str, model, ema, train_losses, val_log,
         'config':           config or {},
     }
     torch.save(ckpt, path)
-    import os
-    print(f"✓ Saved: {path} ({os.path.getsize(path) / 1e6:.1f} MB)")
+    print(f"✓ Saved: {path} ({path.stat().st_size / 1e6:.1f} MB)")
 
 
-def load_checkpoint(path: str, model, ema, device: str = 'cuda',
+def load_checkpoint(path: str | Path, model, ema, device: str = 'cuda',
                     use_best_ema: bool = True):
     """저장된 ckpt를 model + ema에 로드. 학습 metadata 반환.
 
@@ -227,6 +230,7 @@ def load_checkpoint(path: str, model, ema, device: str = 'cuda',
                                   Best validation 시점의 weights라 보통 final보다 좋음.
     use_best_ema=False: 최종 epoch의 ema를 로드.
     """
+    path = Path(path).expanduser()
     ckpt = torch.load(path, map_location=device)
     model.load_state_dict(ckpt['model_state_dict'])
 

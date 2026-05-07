@@ -62,7 +62,7 @@ phase_conditioned_diffusion_policy/
 | 순서 | Notebook | 역할 | 주요 산출물 |
 |---:|---|---|---|
 | 00 | `notebooks/00_data_extraction.ipynb` | Minari Ant dataset 후보를 탐색/다운로드하고, Hilbert transform 기반 phase label을 붙인 demonstration artifact를 생성합니다. | `data/demos_ant_planC.npz`, quality/visualization figure |
-| 01 | `notebooks/01_data_pipeline.ipynb` | episode split, normalization statistics, horizon/frequency metadata를 생성하고 data pipeline sanity check를 수행합니다. | `data/norm_stats.npz`, pipeline diagnostic figure |
+| 01 | `notebooks/01_data_pipeline.ipynb` | episode split, normalization statistics, horizon/frequency metadata를 생성하고 phase diagnostic artifact를 저장합니다. | `data/norm_stats.npz`, pipeline diagnostic figure |
 | 02 | `notebooks/02_vanilla_dp.ipynb` | phase condition이 없는 Diffusion Policy baseline을 학습하거나 checkpoint에서 로드합니다. | `checkpoints/vanilla_dp_ckpt.pt`, `figures/vanilla_dp_loss.png` |
 | 03 | `notebooks/03_phase_periodic.ipynb` | 첫 phase만 global condition으로 주는 periodic phase baseline을 학습/평가합니다. | `checkpoints/phase_periodic_ckpt.pt`, `figures/phase_periodic_loss.png` |
 | 04 | `notebooks/04_phase_trajectory.ipynb` | per-step phase trajectory를 U-Net에 주입하는 main model을 학습/평가합니다. | `checkpoints/phase_trajectory_ckpt.pt`, `figures/phase_trajectory_loss.png` |

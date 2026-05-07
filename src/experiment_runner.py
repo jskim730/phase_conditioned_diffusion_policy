@@ -1,7 +1,7 @@
 """High-level experiment routines used by training notebooks 02--04.
 
 The notebooks should orchestrate these functions only; reusable training,
-checkpoint, rollout, sampling, and sanity-check logic lives here or in narrower
+checkpoint, rollout, and sampling logic lives here or in narrower
 ``src`` modules.
 """
 
@@ -24,7 +24,7 @@ from evaluation import (
 )
 from models import count_params
 from phase import make_phase_trajectory_fn, summarize_sweep_results
-from reproducibility import print_data_summary, set_global_seed
+from reproducibility import set_global_seed
 from sampling import sample_action_chunk
 from training import load_checkpoint, save_checkpoint, train_diffusion_policy
 
@@ -32,7 +32,6 @@ from training import load_checkpoint, save_checkpoint, train_diffusion_policy
 def load_data_and_build_loaders(cfg: ExperimentConfig, data_dir: str | Path):
     """Load project arrays, seed all RNGs, and construct train/validation loaders."""
     data = load_project_data(data_dir)
-    print_data_summary(data)
     seed = set_global_seed(data["seed"])
     train_ds, val_ds, train_loader, val_loader = build_loaders(
         data,
@@ -43,43 +42,17 @@ def load_data_and_build_loaders(cfg: ExperimentConfig, data_dir: str | Path):
     return data, train_ds, val_ds, train_loader, val_loader
 
 
-def build_model_with_sanity_check(
+def build_model(
     cfg: ExperimentConfig,
     data: dict,
     *,
     device: str,
-    train_loader=None,
 ):
-    """Build the configured model and run a variant-appropriate forward sanity check."""
+    """Build the configured model and print the parameter count."""
     model = cfg.build_model(data, device=device)
     n = count_params(model)
     print(f"Total params:     {n['total'] / 1e6:.2f}M")
     print(f"Trainable params: {n['trainable'] / 1e6:.2f}M")
-
-    batch_size = 4
-    fake_action = torch.randn(batch_size, data["PRED_HORIZON"], data["ACT_DIM"], device=device)
-    fake_t = torch.randint(0, cfg.diffusion.num_train_timesteps, (batch_size,), device=device)
-    global_dim = data["OBS_HORIZON"] * data["OBS_DIM"]
-    if cfg.name.startswith("periodic_phase"):
-        global_dim += 2
-    fake_global = torch.randn(batch_size, global_dim, device=device)
-
-    with torch.no_grad():
-        if cfg.name.startswith("phase_trajectory"):
-            fake_phase = torch.randn(batch_size, data["PRED_HORIZON"], cfg.model.per_step_cond_dim, device=device)
-            out = model(fake_action, fake_t, fake_global, fake_phase)
-        else:
-            out = model(fake_action, fake_t, fake_global)
-    assert out.shape == fake_action.shape, (out.shape, fake_action.shape)
-    print(f"✓ Forward pass: in {tuple(fake_action.shape)} → out {tuple(out.shape)}")
-
-    if train_loader is not None:
-        train_cond_fn = cfg.resolve_train_cond_fn()
-        sample_batch = next(iter(train_loader))
-        global_cond, per_step_cond = train_cond_fn(sample_batch, device)
-        print(f"✓ train cond global: {tuple(global_cond.shape)}")
-        print(f"✓ train cond per-step: {None if per_step_cond is None else tuple(per_step_cond.shape)}")
-
     return model
 
 
@@ -181,7 +154,6 @@ def sample_single_batch(
         device=device,
         seed=seed,
     ).numpy()
-    print(f"Samples: shape={samples.shape}, min={samples.min():.3f}, max={samples.max():.3f}")
     return samples
 
 

@@ -75,6 +75,7 @@ phase_conditioned_diffusion_policy/
 │   ├── 04_phase_trajectory.ipynb
 │   └── 05_evaluation.ipynb
 └── src/
+    ├── configs.py
     ├── dataset.py
     ├── models.py
     ├── training.py
@@ -85,6 +86,7 @@ phase_conditioned_diffusion_policy/
 
 | 파일 | 핵심 내용 |
 |---|---|
+| `src/configs.py` | named experiment config, scheduler/model/EMA builder, checkpoint path helper, ablation sweep helper |
 | `src/dataset.py` | normalization helper, `AntPhaseDataset`, Google Drive project data loader, train/val DataLoader builder |
 | `src/models.py` | Diffusion Policy용 Conditional 1D U-Net, Periodic Phase 모델 builder, Phase Trajectory FiLM U-Net |
 | `src/training.py` | DDPM epsilon-prediction training loop, EMA validation, checkpoint save/load, training-time condition extractor |
@@ -220,6 +222,55 @@ per-step phase encoder는 zero-init으로 시작해 학습 초기에 기존 Diff
 | Vanilla | `vanilla_cond_fn` |
 | Periodic Phase | `periodic_phase_cond_fn` |
 | Phase Trajectory | `trajectory_phase_cond_fn` |
+
+### 9.1 Config 중심 실행 패턴
+
+매 notebook에서 `NUM_EPOCHS`, `NUM_TRAIN_TIMESTEPS`, `CKPT_PATH`, `cond_fn` 등을 직접 수정하지 않도록 `src/configs.py`의 named config를 사용합니다. 기본 제공 config는 `vanilla`, `periodic_phase`, `phase_trajectory`입니다.
+
+```python
+from configs import get_experiment_config
+from dataset import build_loaders, load_project_data
+from training import save_checkpoint, train_diffusion_policy
+
+cfg = get_experiment_config(
+    'phase_trajectory',
+    training={'num_epochs': 60},          # ablation별 override는 여기에서만 변경
+    diffusion={'num_inference_steps': 16},
+)
+
+data = load_project_data()
+train_loader, val_loader = build_loaders(
+    data,
+    batch_size=cfg.data.batch_size,
+    num_workers=cfg.data.num_workers,
+)
+
+model = cfg.build_model(data, device=device)
+ema = cfg.build_ema(model)
+noise_scheduler = cfg.build_noise_scheduler()
+cond_fn = cfg.resolve_train_cond_fn()
+
+train_losses, val_log, best_ema_state = train_diffusion_policy(
+    model, ema, noise_scheduler, train_loader, val_loader,
+    cond_fn=cond_fn, device=device, **cfg.training_kwargs(),
+)
+save_checkpoint(
+    cfg.checkpoint_path(), model, ema, train_losses, val_log,
+    best_ema_state=best_ema_state, config=cfg.to_dict(),
+)
+```
+
+Ablation study는 dotted-key sweep으로 여러 config를 만들 수 있습니다.
+
+```python
+from configs import make_ablation_configs
+
+runs = make_ablation_configs('phase_trajectory', {
+    'small_unet': {'model.down_dims': (128, 256, 512)},
+    'short_train': {'training.num_epochs': 30},
+    'more_diffusion_steps': {'diffusion.num_train_timesteps': 200},
+})
+```
 
 ---
 

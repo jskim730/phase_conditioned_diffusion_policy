@@ -8,12 +8,34 @@ runtime dependency, while still being easy to serialize into checkpoints.
 
 from __future__ import annotations
 
+import random
+
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 
 VariantName = str
+
+
+def set_global_seed(seed: int, *, deterministic: bool = False) -> int:
+    """Seed Python, NumPy, and PyTorch RNGs for a configured run."""
+    import numpy as np
+    import torch
+
+    seed = int(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    if deterministic:
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except TypeError:
+            torch.use_deterministic_algorithms(True)
+    return seed
 
 
 @dataclass(frozen=True)
@@ -123,6 +145,8 @@ class ExperimentConfig:
     training: TrainingConfig
     evaluation: EvaluationConfig
     artifacts: ArtifactConfig
+    seed: int = 42
+    deterministic: bool = False
     tags: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -293,6 +317,8 @@ def get_experiment_config(
     training: Mapping[str, Any] | None = None,
     evaluation: Mapping[str, Any] | None = None,
     artifacts: Mapping[str, Any] | None = None,
+    seed: int | None = None,
+    deterministic: bool | None = None,
     tags: tuple[str, ...] | None = None,
 ) -> ExperimentConfig:
     """Return a named config with optional section-level overrides.
@@ -301,6 +327,7 @@ def get_experiment_config(
         ``get_experiment_config("phase_trajectory")``
         ``get_experiment_config("periodic_phase", training={"num_epochs": 30})``
         ``get_experiment_config("vanilla", model={"down_dims": (128, 256, 512)})``
+        ``get_experiment_config("phase_trajectory", seed=123, deterministic=True)``
     """
     if name not in EXPERIMENT_CONFIGS:
         valid = ", ".join(available_experiments())
@@ -318,6 +345,10 @@ def get_experiment_config(
     for section, values in overrides.items():
         if values:
             config = _replace_nested(config, section, values)
+    if seed is not None:
+        config = replace(config, seed=int(seed))
+    if deterministic is not None:
+        config = replace(config, deterministic=bool(deterministic))
     if tags is not None:
         config = replace(config, tags=tags)
     return config

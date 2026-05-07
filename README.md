@@ -61,7 +61,7 @@ phase_conditioned_diffusion_policy/
 
 | 순서 | Notebook | 역할 | 주요 산출물 |
 |---:|---|---|---|
-| 00 | `notebooks/00_data_extraction.ipynb` | Minari Ant dataset 후보를 탐색/다운로드하고, Hilbert transform 기반 phase label을 붙인 demonstration artifact를 생성합니다. | `data/demos_ant_planC.npz`, quality/visualization figure |
+| 00 | `notebooks/00_data_extraction.ipynb` | Minari Ant dataset 후보를 탐색/다운로드하고, Hilbert transform 기반 phase label을 붙인 demonstration artifact를 생성합니다. | `data/demos_ant.npz`, quality/visualization figure |
 | 01 | `notebooks/01_data_pipeline.ipynb` | episode split, normalization statistics, horizon/frequency metadata를 생성하고 phase diagnostic artifact를 저장합니다. | `data/norm_stats.npz`, pipeline diagnostic figure |
 | 02 | `notebooks/02_vanilla_dp.ipynb` | phase condition이 없는 Diffusion Policy baseline을 학습하거나 checkpoint에서 로드합니다. | `checkpoints/vanilla_dp_ckpt.pt`, `figures/vanilla_dp_loss.png` |
 | 03 | `notebooks/03_phase_periodic.ipynb` | 첫 phase만 global condition으로 주는 periodic phase baseline을 학습/평가합니다. | `checkpoints/phase_periodic_ckpt.pt`, `figures/phase_periodic_loss.png` |
@@ -75,7 +75,7 @@ phase_conditioned_diffusion_policy/
 | `src/paths.py` | repository root, notebook directory, artifact root와 `data/`, `checkpoints/`, `results/`, `figures/`, `videos/` 디렉터리를 일관되게 해석합니다. `PCDP_ARTIFACT_ROOT` 환경변수 또는 Google Drive mount를 우선 사용합니다. |
 | `src/configs.py` | `vanilla`, `periodic_phase`, `phase_trajectory` named experiment config를 정의합니다. 모델 builder, condition function, scheduler, EMA, checkpoint 이름이 여기에서 연결됩니다. |
 | `src/data_extraction.py` | Minari Ant dataset discovery, episode materialization, Hilbert transform phase extraction, phase quality filtering, demo 저장 및 diagnostic plot 생성을 담당합니다. |
-| `src/data_pipeline.py` | `demos_ant_planC.npz`를 train/val episode로 분할하고 observation/action normalization stats 및 frequency metadata를 `norm_stats.npz`로 저장합니다. |
+| `src/data_pipeline.py` | `demos_ant.npz`를 train/val episode로 분할하고 observation/action normalization stats 및 frequency metadata를 `norm_stats.npz`로 저장합니다. |
 | `src/dataset.py` | `AntPhaseDataset`, obs/action normalization helper, artifact loader, DataLoader builder를 제공합니다. 모든 sample은 `obs`, `action`, `phase`를 반환하므로 vanilla부터 phase-conditioned 모델까지 같은 Dataset을 공유합니다. |
 | `src/models.py` | vanilla/periodic 모델용 Conditional 1D U-Net과 phase trajectory FiLM U-Net을 구현합니다. |
 | `src/training.py` | DDPM epsilon-prediction training loop, EMA validation, checkpoint save/load, training-time condition extraction function을 제공합니다. |
@@ -116,7 +116,7 @@ artifact root 아래에는 다음 디렉터리가 사용됩니다.
 ```text
 <artifact_root>/
 ├── data/
-│   ├── demos_ant_planC.npz
+│   ├── demos_ant.npz
 │   └── norm_stats.npz
 ├── checkpoints/
 │   ├── vanilla_dp_ckpt.pt
@@ -135,7 +135,7 @@ export PCDP_ARTIFACT_ROOT=/absolute/path/to/pcdp_artifacts
 
 ## 데이터 포맷
 
-### `demos_ant_planC.npz`
+### `demos_ant.npz`
 
 `00_data_extraction.ipynb`가 생성하는 raw demonstration artifact입니다.
 

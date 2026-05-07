@@ -13,7 +13,7 @@ from typing import Callable, Optional
 import numpy as np
 import torch
 
-from configs import ExperimentConfig
+from configs import ExperimentConfig, set_global_seed
 from dataset import build_loaders, load_project_data
 from evaluation import (
     EvaluationState,
@@ -24,7 +24,6 @@ from evaluation import (
 )
 from models import count_params
 from phase import make_phase_trajectory_fn, summarize_sweep_results
-from reproducibility import set_global_seed
 from sampling import sample_action_chunk
 from training import load_checkpoint, save_checkpoint, train_diffusion_policy
 
@@ -32,13 +31,13 @@ from training import load_checkpoint, save_checkpoint, train_diffusion_policy
 def load_data_and_build_loaders(cfg: ExperimentConfig, data_dir: str | Path):
     """Load project arrays, seed all RNGs, and construct train/validation loaders."""
     data = load_project_data(data_dir)
-    seed = set_global_seed(data["seed"])
+    seed = set_global_seed(cfg.seed, deterministic=cfg.deterministic)
     train_ds, val_ds, train_loader, val_loader = build_loaders(
         data,
         batch_size=cfg.data.batch_size,
         num_workers=cfg.data.num_workers,
     )
-    print(f"✓ Reproducibility seed: {seed}")
+    print(f"✓ Experiment seed: {seed}")
     return data, train_ds, val_ds, train_loader, val_loader
 
 

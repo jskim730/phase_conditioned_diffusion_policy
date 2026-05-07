@@ -18,6 +18,7 @@ import numpy as np
 
 from configs import ExperimentConfig, get_experiment_config
 from models import count_params
+from gait_metrics import annotate_rollout_with_gait_metrics
 from phase import controllability_sweep_frequencies, frequency_zone, make_phase_trajectory_fn
 from sampling import rollout_multi_seed
 from training import load_checkpoint
@@ -26,6 +27,11 @@ from training import load_checkpoint
 EVAL_CONFIG_NAMES: tuple[str, ...] = ("vanilla", "periodic_phase", "phase_trajectory")
 MODEL_KEYS: tuple[str, ...] = ("vanilla", "periodic", "trajectory")
 PHASE_MODEL_KEYS: tuple[str, ...] = ("periodic", "trajectory")
+SUMMARY_MODEL_LABELS: dict[str, str] = {
+    "vanilla": "Vanilla DP",
+    "periodic": "Periodic Phase",
+    "trajectory": "Trajectory (ours)",
+}
 
 
 @dataclass(frozen=True)
@@ -74,7 +80,7 @@ class FrequencySweepProtocol:
 
 @dataclass(frozen=True)
 class PhaseSweepProtocol:
-    """Phase-offset grid used to test whether phase information affects rollout."""
+    """Phase-offset grid used for phase-alignment robustness evaluation."""
 
     freq_hz: float
     phase_offsets: np.ndarray
@@ -172,7 +178,7 @@ def evaluate_model_spec_at_frequency(
     if spec.uses_phase_trajectory:
         phase_fn = make_phase_trajectory_fn(freq_hz, dt=dt, phase0=phase0)
 
-    return rollout_multi_seed(
+    raw_results = rollout_multi_seed(
         spec.model,
         spec.ema,
         env,
@@ -194,6 +200,27 @@ def evaluate_model_spec_at_frequency(
         phase_trajectory_fn=phase_fn,
         device=device,
     )
+    phase_joint_idx = _phase_joint_idx_from_data(data)
+    return [
+        annotate_rollout_with_gait_metrics(
+            result,
+            command_freq_hz=freq_hz,
+            dt=dt,
+            phase0=phase0,
+            phase_joint_idx=phase_joint_idx,
+        )
+        for result in raw_results
+    ]
+
+
+def _phase_joint_idx_from_data(data: Mapping[str, object], default: int = 19) -> int:
+    """Return the expert-demo phase joint index used for Hilbert phase labels."""
+    if "phase_joint_idx" in data:
+        return int(data["phase_joint_idx"])
+    demos = data.get("demos") if isinstance(data, Mapping) else None
+    if demos is not None and "phase_joint_idx" in demos:
+        return int(demos["phase_joint_idx"])
+    return int(default)
 
 
 def evaluate_model_at_frequency(
@@ -338,7 +365,7 @@ def run_phase_sweep_evaluation(
     max_steps: int,
     dt: float = 0.05,
 ) -> dict[str, dict[float, list[dict]]]:
-    """Run phase-offset sweeps to verify phase conditioning is not ignored."""
+    """Run phase-offset controllability and phase-alignment robustness sweeps."""
     all_results: dict[str, dict[float, list[dict]]] = {}
     for model_key in model_keys:
         print(f"=== {state.model_specs[model_key].label} phase-offset sweep ===")
@@ -365,24 +392,37 @@ def run_phase_sweep_evaluation(
 
 
 def print_table1_summary(state: EvaluationState, table1_results: Mapping[str, list[dict]], *, freq_hz: float) -> None:
-    """Print in-distribution performance and standard-error diagnostics."""
+    """Print in-distribution gait quality, not just survival/return."""
     n_seeds = len(next(iter(table1_results.values())))
     print(f"\n=== Table 1: In-distribution @ f={freq_hz:.3f} Hz, n={n_seeds} ===")
-    print(f"{'Model':>20s} | {'Survival':>15s} | {'Reward':>17s}")
-    print("-" * 60)
+    print(
+        f"{'Model':>20s} | {'Survival':>15s} | {'Reward':>17s} | "
+        f"{'Reward/Step':>17s} | {'Forward Vel.':>17s}"
+    )
+    print("-" * 96)
     for key in MODEL_KEYS:
         surv, rew = result_arrays(table1_results[key])
+        rps = metric_array(table1_results[key], "reward_per_step")
+        x_vel = metric_array(table1_results[key], "mean_x_velocity")
         print(
             f"{state.model_specs[key].label:>20s} | "
             f"{surv.mean():>5.0f} ± {surv.std():>4.0f}    | "
-            f"{rew.mean():>7.1f} ± {rew.std():>5.1f}"
+            f"{rew.mean():>7.1f} ± {rew.std():>5.1f} | "
+            f"{nanmean(rps):>7.3f} ± {nanstd(rps):>5.3f} | "
+            f"{nanmean(x_vel):>7.3f} ± {nanstd(x_vel):>5.3f}"
         )
 
     print("\n=== Standard Error (std/√n) ===")
     for key in MODEL_KEYS:
         _, rew = result_arrays(table1_results[key])
-        se = rew.std() / np.sqrt(len(rew))
-        print(f"{state.model_specs[key].label:>20s}: SE = {se:.1f}  ({se / rew.mean() * 100:.1f}% of mean)")
+        rps = metric_array(table1_results[key], "reward_per_step")
+        x_vel = metric_array(table1_results[key], "mean_x_velocity")
+        print(
+            f"{state.model_specs[key].label:>20s}: "
+            f"reward SE={rew.std() / np.sqrt(len(rew)):.1f}, "
+            f"reward/step SE={nanstd(rps) / np.sqrt(len(rps)):.3f}, "
+            f"x_vel SE={nanstd(x_vel) / np.sqrt(len(x_vel)):.3f}"
+        )
 
 
 def print_frequency_sweep_summary(
@@ -390,42 +430,67 @@ def print_frequency_sweep_summary(
     protocol: FrequencySweepProtocol,
     sweep_results: Mapping[str, Mapping[float, list[dict]]],
 ) -> None:
-    """Print Periodic-vs-Trajectory frequency controllability table."""
-    print("=== Table 2: Frequency sweep ===")
-    print(f"{'freq':>6s} | {'zone':>8s} | {'Periodic':>26s} | {'Trajectory':>26s} | Δreward")
-    print(f"{'':6s} | {'':8s} | {'surv':>11s} {'reward':>13s} | {'surv':>11s} {'reward':>13s}")
-    print("-" * 96)
+    """Print command-frequency tracking metrics for phase-conditioned models."""
+    print("=== Table 2: Frequency command tracking ===")
+    print(
+        f"{'freq_cmd':>8s} | {'zone':>8s} | {'model':>18s} | {'survival':>12s} | "
+        f"{'reward/step':>13s} | {'x_vel':>11s} | {'freq_meas':>13s} | {'|freq_err|':>12s} | {'PLV':>9s}"
+    )
+    print("-" * 128)
     for freq in protocol.sweep_freqs:
         freq = float(freq)
-        p_surv, p_rew = result_arrays(sweep_results["periodic"][freq])
-        t_surv, t_rew = result_arrays(sweep_results["trajectory"][freq])
-        print(
-            f"{freq:>6.3f} | {frequency_zone(freq, data):>8s} | "
-            f"{p_surv.mean():>5.0f}±{p_surv.std():>3.0f}  {p_rew.mean():>5.0f}±{p_rew.std():>4.0f} | "
-            f"{t_surv.mean():>5.0f}±{t_surv.std():>3.0f}  {t_rew.mean():>5.0f}±{t_rew.std():>4.0f} | "
-            f"{t_rew.mean() - p_rew.mean():+7.0f}"
-        )
+        zone = frequency_zone(freq, data)
+        for model_key in PHASE_MODEL_KEYS:
+            rows = sweep_results[model_key][freq]
+            surv, _ = result_arrays(rows)
+            rps = metric_array(rows, "reward_per_step")
+            x_vel = metric_array(rows, "mean_x_velocity")
+            f_meas = metric_array(rows, "measured_freq_hz")
+            f_err = metric_array(rows, "abs_freq_error_hz")
+            plv = metric_array(rows, "phase_locking_value")
+            print(
+                f"{freq:>8.3f} | {zone:>8s} | {SUMMARY_MODEL_LABELS[model_key]:>18s} | "
+                f"{surv.mean():>5.0f}±{surv.std():<4.0f} | "
+                f"{nanmean(rps):>6.3f}±{nanstd(rps):<5.3f} | "
+                f"{nanmean(x_vel):>5.3f}±{nanstd(x_vel):<5.3f} | "
+                f"{nanmean(f_meas):>6.3f}±{nanstd(f_meas):<5.3f} | "
+                f"{nanmean(f_err):>6.3f}±{nanstd(f_err):<5.3f} | "
+                f"{nanmean(plv):>5.3f}±{nanstd(plv):<5.3f}"
+            )
 
 
 def print_phase_sweep_summary(
     protocol: PhaseSweepProtocol,
     phase_results: Mapping[str, Mapping[float, list[dict]]],
 ) -> None:
-    """Print phase-offset robustness/sensitivity table."""
-    print(f"=== Table 3: Phase-offset sweep @ f={protocol.freq_hz:.3f} Hz ===")
-    print(f"{'phase0':>7s} | {'Periodic':>26s} | {'Trajectory':>26s} | Δreward")
-    print(f"{'':7s} | {'surv':>11s} {'reward':>13s} | {'surv':>11s} {'reward':>13s}")
-    print("-" * 84)
+    """Print phase-offset controllability / alignment robustness diagnostics."""
+    print(f"=== Table 3: Phase-offset controllability @ f={protocol.freq_hz:.3f} Hz ===")
+    print(
+        f"{'phase0':>7s} | {'model':>18s} | {'survival':>12s} | {'reward/step':>13s} | "
+        f"{'x_vel':>11s} | {'freq_meas':>13s} | {'|phase_off_err|':>15s} | {'mean|phase_err|':>16s} | {'PLV':>9s}"
+    )
+    print("-" * 132)
     for phase0, label in zip(protocol.phase_offsets, protocol.phase_labels):
         phase0 = float(phase0)
-        p_surv, p_rew = result_arrays(phase_results["periodic"][phase0])
-        t_surv, t_rew = result_arrays(phase_results["trajectory"][phase0])
-        print(
-            f"{label:>7s} | "
-            f"{p_surv.mean():>5.0f}±{p_surv.std():>3.0f}  {p_rew.mean():>5.0f}±{p_rew.std():>4.0f} | "
-            f"{t_surv.mean():>5.0f}±{t_surv.std():>3.0f}  {t_rew.mean():>5.0f}±{t_rew.std():>4.0f} | "
-            f"{t_rew.mean() - p_rew.mean():+7.0f}"
-        )
+        for model_key in PHASE_MODEL_KEYS:
+            rows = phase_results[model_key][phase0]
+            surv, _ = result_arrays(rows)
+            rps = metric_array(rows, "reward_per_step")
+            x_vel = metric_array(rows, "mean_x_velocity")
+            f_meas = metric_array(rows, "measured_freq_hz")
+            phase_offset_err = metric_array(rows, "abs_phase_offset_error")
+            phase_err = metric_array(rows, "mean_abs_phase_error")
+            plv = metric_array(rows, "phase_locking_value")
+            print(
+                f"{label:>7s} | {SUMMARY_MODEL_LABELS[model_key]:>18s} | "
+                f"{surv.mean():>5.0f}±{surv.std():<4.0f} | "
+                f"{nanmean(rps):>6.3f}±{nanstd(rps):<5.3f} | "
+                f"{nanmean(x_vel):>5.3f}±{nanstd(x_vel):<5.3f} | "
+                f"{nanmean(f_meas):>6.3f}±{nanstd(f_meas):<5.3f} | "
+                f"{nanmean(phase_offset_err):>6.3f}±{nanstd(phase_offset_err):<5.3f} | "
+                f"{nanmean(phase_err):>6.3f}±{nanstd(phase_err):<5.3f} | "
+                f"{nanmean(plv):>5.3f}±{nanstd(plv):<5.3f}"
+            )
 
 
 def result_arrays(results_list: Sequence[Mapping[str, object]]) -> tuple[np.ndarray, np.ndarray]:
@@ -433,6 +498,29 @@ def result_arrays(results_list: Sequence[Mapping[str, object]]) -> tuple[np.ndar
     survival = np.array([r["survival"] for r in results_list], dtype=np.float32)
     reward = np.array([r["total_reward"] for r in results_list], dtype=np.float32)
     return survival, reward
+
+
+def metric_array(results_list: Sequence[Mapping[str, object]], key: str) -> np.ndarray:
+    """Return an optional per-rollout metric array with NaN fallback."""
+    if key == "reward_per_step":
+        values = [r.get(key, r["total_reward"] / max(int(r["survival"]), 1)) for r in results_list]
+    else:
+        values = [r.get(key, np.nan) for r in results_list]
+    return np.asarray(values, dtype=np.float32)
+
+
+def nanmean(values: np.ndarray) -> float:
+    """NaN-safe mean that returns NaN without emitting all-NaN warnings."""
+    values = np.asarray(values, dtype=np.float32)
+    finite = values[np.isfinite(values)]
+    return float(finite.mean()) if finite.size else float("nan")
+
+
+def nanstd(values: np.ndarray) -> float:
+    """NaN-safe std that returns NaN without emitting all-NaN warnings."""
+    values = np.asarray(values, dtype=np.float32)
+    finite = values[np.isfinite(values)]
+    return float(finite.std()) if finite.size else float("nan")
 
 
 def build_eval_results_payload(
@@ -455,6 +543,7 @@ def build_eval_results_payload(
         "f_mean": np.asarray(float(data["freq_window_mean"]), dtype=np.float32),
         "freq_window_min": np.asarray(float(data["freq_window_min"]), dtype=np.float32),
         "freq_window_max": np.asarray(float(data["freq_window_max"]), dtype=np.float32),
+        "phase_joint_idx": np.asarray(_phase_joint_idx_from_data(data), dtype=np.int32),
         "in_freqs": np.asarray(freq_protocol.in_freqs, dtype=np.float32),
         "ood_freqs": np.asarray(freq_protocol.ood_freqs, dtype=np.float32),
         "sweep_freqs": np.asarray(freq_protocol.sweep_freqs, dtype=np.float32),
@@ -468,10 +557,30 @@ def build_eval_results_payload(
         survival, reward = result_arrays(table1_results[key])
         payload[f"table1_{key}_survival"] = survival
         payload[f"table1_{key}_reward"] = reward
+        _add_metric_vectors(payload, f"table1_{key}", table1_results[key])
 
     _add_grid_results(payload, prefix="freq", grid=freq_protocol.sweep_freqs, results=freq_results)
     _add_grid_results(payload, prefix="phase", grid=phase_protocol.phase_offsets, results=phase_results)
     return payload
+
+
+def _add_metric_vectors(payload: dict[str, np.ndarray], prefix: str, results_list: Sequence[Mapping[str, object]]) -> None:
+    metric_keys = (
+        "reward_per_step",
+        "mean_x_velocity",
+        "x_displacement",
+        "mean_reward_forward",
+        "measured_freq_hz",
+        "freq_error_hz",
+        "abs_freq_error_hz",
+        "freq_ratio",
+        "mean_abs_phase_error",
+        "phase_locking_value",
+        "phase_offset_error",
+        "abs_phase_offset_error",
+    )
+    for key in metric_keys:
+        payload[f"{prefix}_{key}"] = metric_array(results_list, key).astype(np.float32)
 
 
 def _add_grid_results(
@@ -481,15 +590,33 @@ def _add_grid_results(
     grid: Sequence[float],
     results: Mapping[str, Mapping[float, list[dict]]],
 ) -> None:
+    metric_keys = (
+        "survival",
+        "reward",
+        "reward_per_step",
+        "mean_x_velocity",
+        "x_displacement",
+        "mean_reward_forward",
+        "measured_freq_hz",
+        "freq_error_hz",
+        "abs_freq_error_hz",
+        "freq_ratio",
+        "mean_abs_phase_error",
+        "phase_locking_value",
+        "phase_offset_error",
+        "abs_phase_offset_error",
+    )
     for model_key in PHASE_MODEL_KEYS:
-        survival_rows = []
-        reward_rows = []
+        rows_by_metric: dict[str, list[np.ndarray]] = {key: [] for key in metric_keys}
         for value in grid:
-            survival, reward = result_arrays(results[model_key][float(value)])
-            survival_rows.append(survival)
-            reward_rows.append(reward)
-        payload[f"{prefix}_{model_key}_survival"] = np.stack(survival_rows).astype(np.float32)
-        payload[f"{prefix}_{model_key}_reward"] = np.stack(reward_rows).astype(np.float32)
+            rows = results[model_key][float(value)]
+            survival, reward = result_arrays(rows)
+            rows_by_metric["survival"].append(survival)
+            rows_by_metric["reward"].append(reward)
+            for key in metric_keys[2:]:
+                rows_by_metric[key].append(metric_array(rows, key))
+        for key, rows in rows_by_metric.items():
+            payload[f"{prefix}_{model_key}_{key}"] = np.stack(rows).astype(np.float32)
 
 
 def save_eval_results_npz(payload: Mapping[str, np.ndarray], output_path: str | Path) -> Path:

@@ -47,6 +47,7 @@ def load_demo_artifact(data_path: str | Path, *, verbose: bool = False) -> dict[
         "freq_window_std": float(demos["freq_window_std"]),
         "freq_window_min": float(demos["freq_window_min"]),
         "freq_window_max": float(demos["freq_window_max"]),
+        "phase_joint_idx": int(demos["phase_joint_idx"]) if "phase_joint_idx" in demos else 19,
     }
     if verbose:
         print(f"Keys: {list(demos.keys())}")

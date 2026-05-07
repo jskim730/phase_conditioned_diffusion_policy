@@ -5,6 +5,18 @@ import torch
 from typing import Callable, Optional
 
 
+def _nanmean_or_nan(values: np.ndarray) -> float:
+    finite = np.asarray(values, dtype=np.float32)
+    finite = finite[np.isfinite(finite)]
+    return float(finite.mean()) if finite.size else float('nan')
+
+
+def _nanstd_or_nan(values: np.ndarray) -> float:
+    finite = np.asarray(values, dtype=np.float32)
+    finite = finite[np.isfinite(finite)]
+    return float(finite.std()) if finite.size else float('nan')
+
+
 # =====================================================================
 # Conditioning extractors at sampling time
 # =====================================================================
@@ -144,6 +156,7 @@ def rollout(
     total_reward = 0.0
     survival = 0
     obs_log, act_log, frames = [], [], []
+    x_velocity_log, reward_forward_log, x_position_log = [], [], []
 
     step = 0
     while step < max_steps:
@@ -182,7 +195,7 @@ def rollout(
         # Execute action_horizon steps
         for k in range(min(action_horizon, max_steps - step)):
             action = chunk[k]
-            obs_next, reward, terminated, truncated, _ = env.step(action)
+            obs_next, reward, terminated, truncated, info = env.step(action)
             total_reward += reward
             survival += 1
             step += 1
@@ -191,6 +204,9 @@ def rollout(
             obs_history.append(obs_next_t)
             obs_log.append(obs_next_t)
             act_log.append(action)
+            x_velocity_log.append(float(info.get('x_velocity', np.nan)))
+            reward_forward_log.append(float(info.get('reward_forward', np.nan)))
+            x_position_log.append(float(info.get('x_position', np.nan)))
 
             if render:
                 frames.append(env.render())
@@ -201,11 +217,23 @@ def rollout(
 
     ema.restore(model.parameters())
 
+    x_velocity_arr = np.asarray(x_velocity_log, dtype=np.float32)
+    reward_forward_arr = np.asarray(reward_forward_log, dtype=np.float32)
+    x_position_arr = np.asarray(x_position_log, dtype=np.float32)
+
     return {
         'total_reward': float(total_reward),
         'survival':     int(survival),
+        'reward_per_step': float(total_reward / max(survival, 1)),
+        'mean_x_velocity': _nanmean_or_nan(x_velocity_arr),
+        'std_x_velocity': _nanstd_or_nan(x_velocity_arr),
+        'x_displacement': float(x_position_arr[-1] - x_position_arr[0]) if x_position_arr.size >= 2 and np.isfinite(x_position_arr[[0, -1]]).all() else float('nan'),
+        'mean_reward_forward': _nanmean_or_nan(reward_forward_arr),
         'obs_log':      np.asarray(obs_log),
         'act_log':      np.asarray(act_log),
+        'x_velocity_log': x_velocity_arr,
+        'reward_forward_log': reward_forward_arr,
+        'x_position_log': x_position_arr,
         'frames':       frames,
     }
 
@@ -219,13 +247,20 @@ def rollout_multi_seed(model, ema, env, n_seeds: int = 5, deterministic_sampling
         sampling_seed_base = s if deterministic_sampling else None
         res = rollout(model, ema, env, seed=s, sampling_seed_base=sampling_seed_base, **kwargs)
         results.append(res)
+        x_vel = res.get('mean_x_velocity', float('nan'))
         print(f"  seed {s}: survival={res['survival']:>3d} steps, "
-              f"total_reward={res['total_reward']:>8.1f}")
+              f"total_reward={res['total_reward']:>8.1f}, "
+              f"reward/step={res.get('reward_per_step', float('nan')):>6.3f}, "
+              f"x_vel={x_vel:>6.3f}")
 
     surv = np.array([r['survival'] for r in results])
     rew  = np.array([r['total_reward'] for r in results])
+    rps = np.array([r.get('reward_per_step', r['total_reward'] / max(r['survival'], 1)) for r in results])
+    xvel = np.array([r.get('mean_x_velocity', np.nan) for r in results], dtype=np.float32)
     print(f"\nSurvival:  mean={surv.mean():.0f} ± {surv.std():.0f} steps")
     print(f"Reward:    mean={rew.mean():.1f} ± {rew.std():.1f}")
+    print(f"Reward/step: mean={rps.mean():.3f} ± {rps.std():.3f}")
+    print(f"X velocity: mean={_nanmean_or_nan(xvel):.3f} ± {_nanstd_or_nan(xvel):.3f}")
 
     return results
 

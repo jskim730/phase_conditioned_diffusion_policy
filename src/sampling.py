@@ -230,45 +230,6 @@ def rollout_multi_seed(model, ema, env, n_seeds: int = 5, deterministic_sampling
     return results
 
 
-# =====================================================================
-# Diagnostics
-# =====================================================================
-
-def diagnose_obs_distribution(rollout_results, obs_mean, obs_std, obs_dim: int):
-    """Rollout 중 관측된 obs를 정규화한 후 학습 분포와 비교.
-
-    Obs format mismatch (Plan C 105차원 vs Ant-v5 환경) 진단용.
-    """
-    if rollout_results[0]['survival'] == 0:
-        print("Rollout 0 step. 환경 자체 문제.")
-        return None
-
-    rollout_obs = np.concatenate([r['obs_log'] for r in rollout_results], axis=0)
-    rollout_obs_n = (rollout_obs - obs_mean) / obs_std
-
-    print(f"=== Rollout obs (정규화 후) 분포 ===")
-    print(f"전체 mean: {rollout_obs_n.mean():.3f} (학습 분포: ~0)")
-    print(f"전체 std:  {rollout_obs_n.std():.3f} (학습 분포: ~1)")
-    print(f"|값| > 5 비율: {(np.abs(rollout_obs_n) > 5).mean()*100:.1f}% "
-          f"(학습 분포: <0.5%; 클수록 mismatch)")
-
-    dim_means = rollout_obs_n.mean(axis=0)
-    print(f"\n차원별 mean (학습 분포 ~0):")
-    print(f"  abs(mean) > 1 차원 수: {(np.abs(dim_means) > 1).sum()}/{obs_dim}")
-    print(f"  abs(mean) > 3 차원 수: {(np.abs(dim_means) > 3).sum()}/{obs_dim}")
-
-    worst_dims = np.argsort(np.abs(dim_means))[::-1][:5]
-    print(f"\nTop 5 mismatch 차원:")
-    for d in worst_dims:
-        print(f"  dim {d}: {dim_means[d]:+.3f}")
-
-    return {
-        'rollout_obs_n': rollout_obs_n,
-        'dim_means':     dim_means,
-        'worst_dims':    worst_dims,
-    }
-
-
 # ====================================================================
 def trajectory_phase_sample_cond_fn(obs_window: torch.Tensor,
                                      phase_chunk: torch.Tensor,

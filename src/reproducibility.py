@@ -41,12 +41,7 @@ def setup_reproducibility(seed: int, deterministic: bool = False) -> str:
 
 
 def print_data_summary(data: dict[str, Any]) -> None:
-    """Print the dataset dimensions and phase-frequency window used by all runs."""
-    print(f"OBS_DIM={data['OBS_DIM']}, ACT_DIM={data['ACT_DIM']}")
-    print(
-        f"obs_horizon={data['OBS_HORIZON']}, pred_horizon={data['PRED_HORIZON']}, "
-        f"action_horizon={data['ACTION_HORIZON']}"
-    )
+    """Print split and phase-frequency metadata used by all runs."""
     print(f"Train: {len(data['train_eps'])} eps | Val: {len(data['val_eps'])} eps")
     print(f"Freq window: {data['freq_window_mean']:.3f} ± {data['freq_window_std']:.3f} Hz")
 

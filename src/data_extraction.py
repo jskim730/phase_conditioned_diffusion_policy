@@ -98,30 +98,19 @@ def load_first_available_minari_dataset(
 
 
 def materialize_episodes(dataset: Any, expected_obs_dim: int = 105, sample_size: int = 100) -> list[Any]:
-    """Load Minari's episode iterator into a list and print basic shape diagnostics."""
+    """Load Minari's episode iterator into a list and print an episode-length summary."""
     episodes = list(dataset.iterate_episodes())
     print(f"Total episodes loaded: {len(episodes)}")
 
     ep0 = episodes[0]
-    print("\n=== Sample episode ===")
-    print(f"observations shape: {ep0.observations.shape}")
-    print(f"actions shape: {ep0.actions.shape}")
-    print(f"rewards shape: {ep0.rewards.shape}")
-    print(f"length: {len(ep0.actions)}")
-
     actual_obs_dim = ep0.observations.shape[-1]
-    print(f"\nExpected obs dim: {expected_obs_dim}")
-    print(f"Actual obs dim: {actual_obs_dim}")
-    if actual_obs_dim == expected_obs_dim:
-        print("✓ Ant-v5와 호환")
-    elif actual_obs_dim < expected_obs_dim:
-        print(f"⚠ Dataset이 더 적은 차원. {actual_obs_dim}만 사용.")
-    else:
-        print(f"⚠ Dataset이 더 많은 차원. 첫 {expected_obs_dim}만 사용.")
+    if actual_obs_dim < expected_obs_dim:
+        print(f"⚠ Dataset이 예상보다 적은 관측 feature를 제공합니다. {actual_obs_dim}개 feature만 사용합니다.")
+    elif actual_obs_dim > expected_obs_dim:
+        print(f"⚠ Dataset이 예상보다 많은 관측 feature를 제공합니다. 첫 {expected_obs_dim}개 feature만 사용합니다.")
 
     lengths = [len(ep.actions) for ep in episodes[:sample_size]]
-    print(f"\nEpisode length 분포 (sample {len(lengths)}):")
-    print(f"  min={min(lengths)}, mean={np.mean(lengths):.0f}, max={max(lengths)}")
+    print(f"Episode length sample: min={min(lengths)}, mean={np.mean(lengths):.0f}, max={max(lengths)}")
     return episodes
 
 

@@ -15,10 +15,17 @@ import torch
 
 from configs import ExperimentConfig
 from dataset import build_loaders, load_project_data
+from evaluation import (
+    EvaluationState,
+    FrequencySweepProtocol,
+    ModelEvalSpec,
+    evaluate_model_at_frequency,
+    run_frequency_sweep_evaluation,
+)
 from models import count_params
 from phase import make_phase_trajectory_fn, summarize_sweep_results
 from reproducibility import print_data_summary, set_global_seed
-from sampling import rollout_multi_seed, sample_action_chunk
+from sampling import sample_action_chunk
 from training import load_checkpoint, save_checkpoint, train_diffusion_policy
 
 
@@ -224,6 +231,33 @@ def _print_frequency_rmse(samples_by_freq: dict[str, tuple[float, np.ndarray]], 
         print(f"  {label:>14s} (Δf={freq_hz - ref_freq:+.3f} Hz): RMSE = {rmse:.4f}")
 
 
+
+def _compat_evaluation_state(
+    model,
+    ema,
+    ns_config: dict,
+    sample_cond_fn: Callable,
+    *,
+    num_inference_steps: int,
+) -> EvaluationState:
+    """Build a minimal evaluation state for legacy experiment-runner wrappers."""
+    spec = ModelEvalSpec(
+        loaded_name="compat",
+        label="compat",
+        model=model,
+        ema=ema,
+        cond_fn=sample_cond_fn,
+        uses_phase_trajectory=True,
+    )
+    return EvaluationState(
+        configs={},
+        loaded_models={},
+        model_specs={"compat": spec},
+        noise_scheduler_config=ns_config,
+        num_inference_steps=num_inference_steps,
+    )
+
+
 def rollout_at_frequency(
     model,
     ema,
@@ -240,29 +274,30 @@ def rollout_at_frequency(
     device: str,
     dt: float = 0.05,
 ) -> list[dict]:
-    """Evaluate one target frequency with shared rollout defaults."""
+    """Compatibility wrapper for ``evaluation.evaluate_model_at_frequency``.
+
+    Official rollout orchestration lives in :mod:`evaluation`; keep this
+    training-notebook helper only to avoid breaking older notebooks.
+    """
     print(f"=== Rollout @ f={freq_hz:.3f} Hz ===")
-    return rollout_multi_seed(
+    state = _compat_evaluation_state(
         model,
         ema,
-        env,
-        n_seeds=n_seeds,
-        deterministic_sampling=deterministic_sampling,
-        noise_scheduler_config=ns_config,
-        obs_mean=data["obs_mean"],
-        obs_std=data["obs_std"],
-        act_min=data["act_min"],
-        act_range=data["act_range"],
-        cond_fn=sample_cond_fn,
-        obs_horizon=data["OBS_HORIZON"],
-        pred_horizon=data["PRED_HORIZON"],
-        action_horizon=data["ACTION_HORIZON"],
-        obs_dim=data["OBS_DIM"],
-        act_dim=data["ACT_DIM"],
+        ns_config,
+        sample_cond_fn,
         num_inference_steps=num_inference_steps,
-        max_steps=max_steps,
-        phase_trajectory_fn=make_phase_trajectory_fn(freq_hz, dt=dt),
+    )
+    return evaluate_model_at_frequency(
+        state,
+        "compat",
+        freq_hz,
+        env=env,
+        data=data,
         device=device,
+        n_seeds=n_seeds,
+        max_steps=max_steps,
+        dt=dt,
+        deterministic_sampling=deterministic_sampling,
     )
 
 
@@ -283,25 +318,32 @@ def run_frequency_sweep(
     dt: float = 0.05,
 ) -> dict[float, list[dict]]:
     """Run a rollout sweep and return raw results keyed by target frequency."""
-    results: dict[float, list[dict]] = {}
-    for freq_hz in sweep_freqs:
-        freq_hz = float(freq_hz)
-        print(f"\n--- freq={freq_hz:.3f} Hz ---")
-        results[freq_hz] = rollout_at_frequency(
-            model,
-            ema,
-            env,
-            ns_config,
-            data,
-            sample_cond_fn,
-            freq_hz=freq_hz,
-            n_seeds=n_seeds,
-            max_steps=max_steps,
-            num_inference_steps=num_inference_steps,
-            deterministic_sampling=deterministic_sampling,
-            device=device,
-            dt=dt,
-        )
+    sweep_freqs = np.asarray(sweep_freqs, dtype=np.float32)
+    state = _compat_evaluation_state(
+        model,
+        ema,
+        ns_config,
+        sample_cond_fn,
+        num_inference_steps=num_inference_steps,
+    )
+    protocol = FrequencySweepProtocol(
+        in_freqs=np.array([], dtype=np.float32),
+        ood_freqs=np.array([], dtype=np.float32),
+        sweep_freqs=sweep_freqs,
+        zone_labels=np.array([], dtype=str),
+    )
+    results = run_frequency_sweep_evaluation(
+        state,
+        protocol,
+        env=env,
+        data=data,
+        device=device,
+        model_keys=("compat",),
+        n_seeds=n_seeds,
+        max_steps=max_steps,
+        dt=dt,
+        deterministic_sampling=deterministic_sampling,
+    )["compat"]
     summary = summarize_sweep_results(results)
     print("\n=== Sweep summary ===")
     for freq_hz, surv, rew in zip(summary.freqs, summary.survival_mean, summary.reward_mean):

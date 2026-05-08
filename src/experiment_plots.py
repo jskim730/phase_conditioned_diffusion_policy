@@ -11,14 +11,20 @@ import numpy as np
 from phase import summarize_sweep_results
 
 
-def plot_loss_curve(train_losses, val_log, output_path: str | Path, *, title: str) -> Path:
+def plot_loss_curve(
+    train_losses, val_log, output_path: str | Path, *, title: str
+) -> Path:
     """Save train/validation loss curves."""
     output_path = Path(output_path)
     fig, ax = plt.subplots(1, 1, figsize=(10, 4))
     if train_losses:
-        ax.plot(np.arange(1, len(train_losses) + 1), train_losses, label="train", alpha=0.8)
+        ax.plot(
+            np.arange(1, len(train_losses) + 1), train_losses, label="train", alpha=0.8
+        )
     if val_log:
-        ax.plot([v[0] for v in val_log], [v[1] for v in val_log], "o-", label="val (EMA)")
+        ax.plot(
+            [v[0] for v in val_log], [v[1] for v in val_log], "o-", label="val (EMA)"
+        )
     ax.set_xlabel("Epoch")
     ax.set_ylabel("MSE loss")
     ax.set_title(title)
@@ -31,7 +37,9 @@ def plot_loss_curve(train_losses, val_log, output_path: str | Path, *, title: st
     return output_path
 
 
-def plot_sample_histogram(samples: np.ndarray, output_path: str | Path, *, title: str) -> Path:
+def plot_sample_histogram(
+    samples: np.ndarray, output_path: str | Path, *, title: str
+) -> Path:
     """Save a histogram of normalized sampled actions."""
     output_path = Path(output_path)
     fig, ax = plt.subplots(1, 1, figsize=(7, 4))
@@ -49,18 +57,22 @@ def plot_sample_histogram(samples: np.ndarray, output_path: str | Path, *, title
     return output_path
 
 
-def plot_action_chunks(samples_by_label: dict[str, np.ndarray] | dict[str, tuple[float, np.ndarray]],
-                       output_path: str | Path,
-                       *,
-                       title: str,
-                       act_dim: int,
-                       colors: Optional[dict[str, str]] = None) -> Path:
+def plot_action_chunks(
+    samples_by_label: dict[str, np.ndarray] | dict[str, tuple[float, np.ndarray]],
+    output_path: str | Path,
+    *,
+    title: str,
+    act_dim: int,
+    colors: Optional[dict[str, str]] = None,
+) -> Path:
     """Plot sampled action chunks for all action dimensions."""
     output_path = Path(output_path)
     colors = colors or {}
     n_cols = min(4, act_dim)
     n_rows = int(np.ceil(act_dim / n_cols))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3 * n_rows), squeeze=False)
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(4 * n_cols, 3 * n_rows), squeeze=False
+    )
     for dim in range(act_dim):
         ax = axes.flat[dim]
         for label, payload in samples_by_label.items():
@@ -94,20 +106,35 @@ def plot_action_chunks(samples_by_label: dict[str, np.ndarray] | dict[str, tuple
     return output_path
 
 
-def plot_frequency_sweep(sweep_results: dict[float, list[dict]],
-                         data: dict,
-                         output_path: str | Path,
-                         *,
-                         title_prefix: str,
-                         max_steps: int) -> Path:
+def plot_frequency_sweep(
+    sweep_results: dict[float, list[dict]],
+    data: dict,
+    output_path: str | Path,
+    *,
+    title_prefix: str,
+    max_steps: int,
+) -> Path:
     """Save survival/reward curves for a frequency sweep."""
     output_path = Path(output_path)
     summary = summarize_sweep_results(sweep_results)
     f_mean = float(data["freq_window_mean"])
     fig, axes = plt.subplots(1, 2, figsize=(14, 4))
-    axes[0].errorbar(summary.freqs, summary.survival_mean, yerr=summary.survival_std,
-                     fmt="o-", capsize=5, linewidth=2, markersize=7)
-    axes[0].axvspan(data["freq_window_min"], data["freq_window_max"], alpha=0.15, color="green", label="In-dist")
+    axes[0].errorbar(
+        summary.freqs,
+        summary.survival_mean,
+        yerr=summary.survival_std,
+        fmt="o-",
+        capsize=5,
+        linewidth=2,
+        markersize=7,
+    )
+    axes[0].axvspan(
+        data["freq_window_min"],
+        data["freq_window_max"],
+        alpha=0.15,
+        color="green",
+        label="In-dist",
+    )
     axes[0].axvline(f_mean, color="gray", ls="--", alpha=0.5, label="Train mean")
     axes[0].set_xlabel("Sampling-time phase freq (Hz)")
     axes[0].set_ylabel("Survival (steps)")
@@ -116,9 +143,22 @@ def plot_frequency_sweep(sweep_results: dict[float, list[dict]],
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
-    axes[1].errorbar(summary.freqs, summary.reward_mean, yerr=summary.reward_std,
-                     fmt="o-", capsize=5, linewidth=2, markersize=7)
-    axes[1].axvspan(data["freq_window_min"], data["freq_window_max"], alpha=0.15, color="green", label="In-dist")
+    axes[1].errorbar(
+        summary.freqs,
+        summary.reward_mean,
+        yerr=summary.reward_std,
+        fmt="o-",
+        capsize=5,
+        linewidth=2,
+        markersize=7,
+    )
+    axes[1].axvspan(
+        data["freq_window_min"],
+        data["freq_window_max"],
+        alpha=0.15,
+        color="green",
+        label="In-dist",
+    )
     axes[1].axvline(f_mean, color="gray", ls="--", alpha=0.5, label="Train mean")
     axes[1].set_xlabel("Sampling-time phase freq (Hz)")
     axes[1].set_ylabel("Total reward")
@@ -133,7 +173,9 @@ def plot_frequency_sweep(sweep_results: dict[float, list[dict]],
     return output_path
 
 
-def print_step3_vs_step4_table(step3_sweep: dict[float, dict], step4_results: dict[float, list[dict]]) -> None:
+def print_step3_vs_step4_table(
+    step3_sweep: dict[float, dict], step4_results: dict[float, list[dict]]
+) -> None:
     """Print a compact ablation table comparing periodic and trajectory conditioning."""
     print(f"{'freq':>7s} | {'Step 3 (Periodic)':>30s} | {'Step 4 (Trajectory)':>30s}")
     print(f"{'':7s} | {'surv':>10s} {'reward':>15s} | {'surv':>10s} {'reward':>15s}")
@@ -165,8 +207,14 @@ def plot_evaluation_frequency_comparison(
     freqs = sorted(float(f) for f in sweep_results["periodic"].keys())
 
     def means_stds(model_key: str, metric: str) -> tuple[list[float], list[float]]:
-        means = [float(np.mean([r[metric] for r in sweep_results[model_key][f]])) for f in freqs]
-        stds = [float(np.std([r[metric] for r in sweep_results[model_key][f]])) for f in freqs]
+        means = [
+            float(np.mean([r[metric] for r in sweep_results[model_key][f]]))
+            for f in freqs
+        ]
+        stds = [
+            float(np.std([r[metric] for r in sweep_results[model_key][f]]))
+            for f in freqs
+        ]
         return means, stds
 
     p_surv, p_surv_std = means_stds("periodic", "survival")
@@ -182,33 +230,85 @@ def plot_evaluation_frequency_comparison(
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 5))
     ax = axes[0]
-    ax.errorbar(freqs, p_surv, yerr=p_surv_std, fmt="s-", capsize=4, linewidth=1.8,
-                markersize=7, color="tab:green", label="Periodic Phase")
-    ax.errorbar(freqs, t_surv, yerr=t_surv_std, fmt="o-", capsize=4, linewidth=2.2,
-                markersize=8, color="tab:red", label="Trajectory (ours)")
-    ax.errorbar([f_mean], [v_surv.mean()], yerr=[v_surv.std()], fmt="D", capsize=5,
-                markersize=10, color="tab:blue", label="Vanilla (no phase, ref. only)")
+    ax.errorbar(
+        freqs,
+        p_surv,
+        yerr=p_surv_std,
+        fmt="s-",
+        capsize=4,
+        linewidth=1.8,
+        markersize=7,
+        color="tab:green",
+        label="Periodic Phase",
+    )
+    ax.errorbar(
+        freqs,
+        t_surv,
+        yerr=t_surv_std,
+        fmt="o-",
+        capsize=4,
+        linewidth=2.2,
+        markersize=8,
+        color="tab:red",
+        label="Trajectory (ours)",
+    )
+    ax.errorbar(
+        [f_mean],
+        [v_surv.mean()],
+        yerr=[v_surv.std()],
+        fmt="D",
+        capsize=5,
+        markersize=10,
+        color="tab:blue",
+        label="Vanilla (no phase, ref. only)",
+    )
     ax.axvspan(f_min, f_max, alpha=0.12, color="green", label="In-dist range")
     ax.axvline(f_mean, color="gray", ls="--", alpha=0.4)
     ax.set_xlabel("Sampling-time phase freq (Hz)")
     ax.set_ylabel("Survival (steps)")
-    ax.set_title(f"Survival vs Frequency (5 in-dist + 4 OOD, n={n_seeds_sweep})")
+    ax.set_title(f"Survival vs Frequency (3 in-dist + 2 OOD, n={n_seeds_sweep})")
     ax.legend(loc="lower center", fontsize=9)
     ax.grid(True, alpha=0.3)
     ax.set_ylim(-50, 1080)
 
     ax = axes[1]
-    ax.errorbar(freqs, p_rew, yerr=p_rew_std, fmt="s-", capsize=4, linewidth=1.8,
-                markersize=7, color="tab:green", label="Periodic Phase")
-    ax.errorbar(freqs, t_rew, yerr=t_rew_std, fmt="o-", capsize=4, linewidth=2.2,
-                markersize=8, color="tab:red", label="Trajectory (ours)")
-    ax.errorbar([f_mean], [v_rew.mean()], yerr=[v_rew.std()], fmt="D", capsize=5,
-                markersize=10, color="tab:blue", label="Vanilla (no phase, ref. only)")
+    ax.errorbar(
+        freqs,
+        p_rew,
+        yerr=p_rew_std,
+        fmt="s-",
+        capsize=4,
+        linewidth=1.8,
+        markersize=7,
+        color="tab:green",
+        label="Periodic Phase",
+    )
+    ax.errorbar(
+        freqs,
+        t_rew,
+        yerr=t_rew_std,
+        fmt="o-",
+        capsize=4,
+        linewidth=2.2,
+        markersize=8,
+        color="tab:red",
+        label="Trajectory (ours)",
+    )
+    ax.errorbar(
+        [f_mean],
+        [v_rew.mean()],
+        yerr=[v_rew.std()],
+        fmt="D",
+        capsize=5,
+        markersize=10,
+        color="tab:blue",
+        label="Vanilla (no phase, ref. only)",
+    )
     ax.axvspan(f_min, f_max, alpha=0.12, color="green", label="In-dist range")
     ax.axvline(f_mean, color="gray", ls="--", alpha=0.4)
     ax.set_xlabel("Sampling-time phase freq (Hz)")
     ax.set_ylabel("Total reward")
-    ax.set_title(f"Reward vs Frequency (5 in-dist + 4 OOD, n={n_seeds_sweep})")
+    ax.set_title(f"Reward vs Frequency (3 in-dist + 2 OOD, n={n_seeds_sweep})")
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, alpha=0.3)
 

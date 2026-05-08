@@ -7,18 +7,21 @@ from typing import Callable
 
 import numpy as np
 
-
 PhaseTrajectoryFn = Callable[[int, int], np.ndarray]
 
 
-def make_phase_trajectory_fn(freq_hz: float, *, dt: float = 0.05, phase0: float = 0.0) -> PhaseTrajectoryFn:
+def make_phase_trajectory_fn(
+    freq_hz: float, *, dt: float = 0.05, phase0: float = 0.0
+) -> PhaseTrajectoryFn:
     """Return ``fn(start_step, horizon)`` that emits an unwrapped phase trajectory."""
     freq_hz = float(freq_hz)
     dt = float(dt)
     phase0 = float(phase0)
 
     def phase_trajectory(start_step: int, horizon: int) -> np.ndarray:
-        steps = np.arange(int(start_step), int(start_step) + int(horizon), dtype=np.float32)
+        steps = np.arange(
+            int(start_step), int(start_step) + int(horizon), dtype=np.float32
+        )
         return (phase0 + 2.0 * np.pi * freq_hz * steps * dt).astype(np.float32)
 
     return phase_trajectory
@@ -54,16 +57,48 @@ def trajectory_offline_frequencies(data: dict) -> tuple[list[float], list[str]]:
     )
 
 
-def controllability_sweep_frequencies(data: dict, *, n_in_dist: int = 5) -> np.ndarray:
-    """Return the 9-frequency in-distribution/OOD sweep used by Step 4."""
-    f_mean, f_min, f_max = training_frequency_triplet(data)
-    in_freqs = np.linspace(f_min, f_max, n_in_dist, dtype=np.float32)
-    ood_freqs = (f_mean * np.array([0.50, 0.75, 1.25, 1.50], dtype=np.float32)).astype(np.float32)
-    ood_freqs = ood_freqs[ood_freqs > 0.2]
-    sweep = np.concatenate([ood_freqs[:2], in_freqs, ood_freqs[2:]]).astype(np.float32)
-    if len(sweep) != n_in_dist + 4:
-        raise ValueError(f"Expected {n_in_dist + 4} sweep freqs, got {len(sweep)}: {sweep}")
-    return sweep
+def controllability_sweep_frequency_groups(
+    data: dict,
+    *,
+    ood_iqr_scale: float = 1.5,
+    min_freq_hz: float = 0.2,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the 3 in-distribution + 2 IQR-based OOD Table 2 groups.
+
+    The in-distribution commands are the three interior points of a five-point
+    training-support grid, which avoids evaluating exactly at the observed
+    min/max boundaries.  The OOD commands are Tukey-style outer fences around
+    those interior commands: ``q25 - 1.5 * IQR`` and ``q75 + 1.5 * IQR`` by
+    default.
+    """
+    _, f_min, f_max = training_frequency_triplet(data)
+    support_grid = np.linspace(f_min, f_max, 5, dtype=np.float32)
+    in_freqs = support_grid[1:-1].astype(np.float32)
+
+    q25, _, q75 = [float(freq) for freq in in_freqs]
+    iqr = q75 - q25
+    ood_freqs = np.array(
+        [
+            max(float(min_freq_hz), q25 - float(ood_iqr_scale) * iqr),
+            q75 + float(ood_iqr_scale) * iqr,
+        ],
+        dtype=np.float32,
+    )
+    return in_freqs, ood_freqs
+
+
+def controllability_sweep_frequencies(
+    data: dict, *, n_in_dist: int = 3, ood_iqr_scale: float = 1.5
+) -> np.ndarray:
+    """Return the 5-frequency Table 2 sweep: OOD-low + 3 in-dist + OOD-high."""
+    if n_in_dist != 3:
+        raise ValueError(
+            "Table 2 uses exactly three interior in-distribution frequencies."
+        )
+    in_freqs, ood_freqs = controllability_sweep_frequency_groups(
+        data, ood_iqr_scale=ood_iqr_scale
+    )
+    return np.concatenate([ood_freqs[:1], in_freqs, ood_freqs[1:]]).astype(np.float32)
 
 
 def legacy_periodic_sweep_frequencies(data: dict) -> np.ndarray:
@@ -104,8 +139,16 @@ def summarize_sweep_results(sweep_results: dict[float, list[dict]]) -> SweepSumm
     freqs = sorted(float(f) for f in sweep_results.keys())
     return SweepSummary(
         freqs=freqs,
-        survival_mean=[float(np.mean([r["survival"] for r in sweep_results[f]])) for f in freqs],
-        survival_std=[float(np.std([r["survival"] for r in sweep_results[f]])) for f in freqs],
-        reward_mean=[float(np.mean([r["total_reward"] for r in sweep_results[f]])) for f in freqs],
-        reward_std=[float(np.std([r["total_reward"] for r in sweep_results[f]])) for f in freqs],
+        survival_mean=[
+            float(np.mean([r["survival"] for r in sweep_results[f]])) for f in freqs
+        ],
+        survival_std=[
+            float(np.std([r["survival"] for r in sweep_results[f]])) for f in freqs
+        ],
+        reward_mean=[
+            float(np.mean([r["total_reward"] for r in sweep_results[f]])) for f in freqs
+        ],
+        reward_std=[
+            float(np.std([r["total_reward"] for r in sweep_results[f]])) for f in freqs
+        ],
     )

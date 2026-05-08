@@ -19,10 +19,14 @@ import numpy as np
 from configs import ExperimentConfig, get_experiment_config
 from models import count_params
 from gait_metrics import annotate_rollout_with_gait_metrics
-from phase import controllability_sweep_frequencies, frequency_zone, make_phase_trajectory_fn
+from phase import (
+    controllability_sweep_frequencies,
+    controllability_sweep_frequency_groups,
+    frequency_zone,
+    make_phase_trajectory_fn,
+)
 from sampling import rollout_multi_seed
 from training import load_checkpoint
-
 
 EVAL_CONFIG_NAMES: tuple[str, ...] = ("vanilla", "periodic_phase", "phase_trajectory")
 MODEL_KEYS: tuple[str, ...] = ("vanilla", "periodic", "trajectory")
@@ -109,19 +113,25 @@ def load_evaluation_state(
         )
 
     model_specs = {
-        "vanilla": _spec_from_loaded(loaded_models["vanilla"], label="Vanilla DP", uses_phase=False),
+        "vanilla": _spec_from_loaded(
+            loaded_models["vanilla"], label="Vanilla DP", uses_phase=False
+        ),
         "periodic": _spec_from_loaded(
             loaded_models["periodic_phase"], label="Periodic Phase", uses_phase=True
         ),
         "trajectory": _spec_from_loaded(
-            loaded_models["phase_trajectory"], label="Trajectory (ours)", uses_phase=True
+            loaded_models["phase_trajectory"],
+            label="Trajectory (ours)",
+            uses_phase=True,
         ),
     }
 
     print("\n✓ Evaluation checkpoints loaded")
     for key in MODEL_KEYS:
         spec = model_specs[key]
-        print(f"  {spec.label:<18s}: {count_params(spec.model)['trainable'] / 1e6:.2f}M trainable")
+        print(
+            f"  {spec.label:<18s}: {count_params(spec.model)['trainable'] / 1e6:.2f}M trainable"
+        )
 
     return EvaluationState(
         configs=configs,
@@ -132,7 +142,9 @@ def load_evaluation_state(
     )
 
 
-def _spec_from_loaded(loaded: LoadedEvalModel, *, label: str, uses_phase: bool) -> ModelEvalSpec:
+def _spec_from_loaded(
+    loaded: LoadedEvalModel, *, label: str, uses_phase: bool
+) -> ModelEvalSpec:
     return ModelEvalSpec(
         loaded_name=loaded.config_name,
         label=label,
@@ -277,14 +289,32 @@ def run_in_distribution_evaluation(
     return results
 
 
-def build_frequency_sweep_protocol(data: Mapping[str, object], *, n_in_dist: int = 5) -> FrequencySweepProtocol:
-    """Build the 5 in-distribution + 4 OOD frequency grid."""
-    f_mean = float(data["freq_window_mean"])
-    in_freqs = np.linspace(float(data["freq_window_min"]), float(data["freq_window_max"]), n_in_dist, dtype=np.float32)
-    ood_freqs = (f_mean * np.array([0.50, 0.75, 1.25, 1.50], dtype=np.float32)).astype(np.float32)
-    ood_freqs = ood_freqs[ood_freqs > 0.2]
-    sweep_freqs = controllability_sweep_frequencies(data, n_in_dist=n_in_dist)
-    zone_labels = np.array([frequency_zone(float(freq), data) for freq in sweep_freqs])
+def build_frequency_sweep_protocol(
+    data: Mapping[str, object],
+    *,
+    n_in_dist: int = 3,
+    ood_iqr_scale: float = 1.5,
+) -> FrequencySweepProtocol:
+    """Build the 3 in-distribution + 2 IQR-based OOD Table 2 grid."""
+    in_freqs, ood_freqs = controllability_sweep_frequency_groups(
+        data,
+        ood_iqr_scale=ood_iqr_scale,
+    )
+    sweep_freqs = controllability_sweep_frequencies(
+        data,
+        n_in_dist=n_in_dist,
+        ood_iqr_scale=ood_iqr_scale,
+    )
+    iqr_label = f"{ood_iqr_scale:g}IQR"
+    zone_labels = np.array(
+        [
+            f"OOD-low (q25-{iqr_label})",
+            "in-dist (q25)",
+            "in-dist (q50)",
+            "in-dist (q75)",
+            f"OOD-high (q75+{iqr_label})",
+        ]
+    )
     return FrequencySweepProtocol(
         in_freqs=in_freqs,
         ood_freqs=ood_freqs,
@@ -328,12 +358,16 @@ def run_frequency_sweep_evaluation(
                 dt=dt,
                 deterministic_sampling=deterministic_sampling,
             )
-        print(f"\n{state.model_specs[model_key].label} sweep 시간: {(time.time() - t0) / 60:.1f} min\n")
+        print(
+            f"\n{state.model_specs[model_key].label} sweep 시간: {(time.time() - t0) / 60:.1f} min\n"
+        )
         all_results[model_key] = model_results
     return all_results
 
 
-def print_table1_summary(state: EvaluationState, table1_results: Mapping[str, list[dict]], *, freq_hz: float) -> None:
+def print_table1_summary(
+    state: EvaluationState, table1_results: Mapping[str, list[dict]], *, freq_hz: float
+) -> None:
     """Print in-distribution gait quality, not just survival/return."""
     n_seeds = len(next(iter(table1_results.values())))
     print(f"\n=== Table 1: In-distribution @ f={freq_hz:.3f} Hz, n={n_seeds} ===")
@@ -375,13 +409,12 @@ def print_frequency_sweep_summary(
     """Print command-frequency tracking metrics for phase-conditioned models."""
     print("=== Table 2: Frequency command tracking ===")
     print(
-        f"{'freq_cmd':>8s} | {'zone':>8s} | {'model':>18s} | {'survival':>12s} | "
+        f"{'freq_cmd':>8s} | {'zone':>22s} | {'model':>18s} | {'survival':>12s} | "
         f"{'reward/step':>13s} | {'x_vel':>11s} | {'freq_meas':>13s} | {'|freq_err|':>12s} | {'PLV':>9s}"
     )
-    print("-" * 128)
-    for freq in protocol.sweep_freqs:
+    print("-" * 142)
+    for freq, zone in zip(protocol.sweep_freqs, protocol.zone_labels):
         freq = float(freq)
-        zone = frequency_zone(freq, data)
         for model_key in PHASE_MODEL_KEYS:
             rows = sweep_results[model_key][freq]
             surv, _ = result_arrays(rows)
@@ -391,7 +424,7 @@ def print_frequency_sweep_summary(
             f_err = metric_array(rows, "abs_freq_error_hz")
             plv = metric_array(rows, "phase_locking_value")
             print(
-                f"{freq:>8.3f} | {zone:>8s} | {SUMMARY_MODEL_LABELS[model_key]:>18s} | "
+                f"{freq:>8.3f} | {zone:>22s} | {SUMMARY_MODEL_LABELS[model_key]:>18s} | "
                 f"{surv.mean():>5.0f}±{surv.std():<4.0f} | "
                 f"{nanmean(rps):>6.3f}±{nanstd(rps):<5.3f} | "
                 f"{nanmean(x_vel):>5.3f}±{nanstd(x_vel):<5.3f} | "
@@ -401,7 +434,9 @@ def print_frequency_sweep_summary(
             )
 
 
-def result_arrays(results_list: Sequence[Mapping[str, object]]) -> tuple[np.ndarray, np.ndarray]:
+def result_arrays(
+    results_list: Sequence[Mapping[str, object]],
+) -> tuple[np.ndarray, np.ndarray]:
     """Return survival/reward arrays for one list of rollout dicts."""
     survival = np.array([r["survival"] for r in results_list], dtype=np.float32)
     reward = np.array([r["total_reward"] for r in results_list], dtype=np.float32)
@@ -411,7 +446,10 @@ def result_arrays(results_list: Sequence[Mapping[str, object]]) -> tuple[np.ndar
 def metric_array(results_list: Sequence[Mapping[str, object]], key: str) -> np.ndarray:
     """Return an optional per-rollout metric array with NaN fallback."""
     if key == "reward_per_step":
-        values = [r.get(key, r["total_reward"] / max(int(r["survival"]), 1)) for r in results_list]
+        values = [
+            r.get(key, r["total_reward"] / max(int(r["survival"]), 1))
+            for r in results_list
+        ]
     else:
         values = [r.get(key, np.nan) for r in results_list]
     return np.asarray(values, dtype=np.float32)
@@ -460,11 +498,17 @@ def build_eval_results_payload(
         payload[f"table1_{key}_reward"] = reward
         _add_metric_vectors(payload, f"table1_{key}", table1_results[key])
 
-    _add_grid_results(payload, prefix="freq", grid=freq_protocol.sweep_freqs, results=freq_results)
+    _add_grid_results(
+        payload, prefix="freq", grid=freq_protocol.sweep_freqs, results=freq_results
+    )
     return payload
 
 
-def _add_metric_vectors(payload: dict[str, np.ndarray], prefix: str, results_list: Sequence[Mapping[str, object]]) -> None:
+def _add_metric_vectors(
+    payload: dict[str, np.ndarray],
+    prefix: str,
+    results_list: Sequence[Mapping[str, object]],
+) -> None:
     metric_keys = (
         "reward_per_step",
         "mean_x_velocity",
@@ -519,7 +563,9 @@ def _add_grid_results(
             payload[f"{prefix}_{model_key}_{key}"] = np.stack(rows).astype(np.float32)
 
 
-def save_eval_results_npz(payload: Mapping[str, np.ndarray], output_path: str | Path) -> Path:
+def save_eval_results_npz(
+    payload: Mapping[str, np.ndarray], output_path: str | Path
+) -> Path:
     """Persist evaluation arrays and print a reproducible manifest."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -194,6 +194,60 @@ def print_step3_vs_step4_table(
         print(f"{freq_hz:7.3f} | {left} | {right}")
 
 
+def plot_table1_reward_per_step_comparison(
+    table1_results: dict[str, list[dict]],
+    output_path: str | Path,
+    *,
+    interval: str = "ci95",
+) -> Path:
+    """Save a Table-1 reward-per-step bar chart for all three models."""
+    output_path = Path(output_path)
+    model_keys = ["vanilla", "periodic", "trajectory"]
+    labels = ["Vanilla DP", "Periodic Phase", "Trajectory (ours)"]
+    colors = ["tab:blue", "tab:green", "tab:red"]
+
+    means = []
+    spreads = []
+    for key in model_keys:
+        values = [
+            _metric_value(result, "reward_per_step") for result in table1_results[key]
+        ]
+        mean, spread = _mean_spread(values, interval=interval)
+        means.append(mean)
+        spreads.append(spread)
+
+    fig, ax = plt.subplots(1, 1, figsize=(7.2, 4.8))
+    x = np.arange(len(model_keys))
+    ax.bar(x, means, yerr=spreads, capsize=5, color=colors, alpha=0.85)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=12, ha="right")
+    ax.set_ylabel("Reward / step")
+    spread_label = "95% CI" if interval == "ci95" else "std"
+    ax.set_title(f"Table 1 reward per step comparison ({spread_label})")
+    ax.grid(True, axis="y", alpha=0.3)
+
+    finite_means = [mean for mean in means if np.isfinite(mean)]
+    if finite_means:
+        y_offset = max(abs(max(finite_means)) * 0.02, 0.02)
+        for xpos, mean in zip(x, means):
+            if np.isfinite(mean):
+                ax.text(
+                    xpos,
+                    mean + y_offset,
+                    f"{mean:.3f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                )
+
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=140, bbox_inches="tight")
+    plt.show()
+    print(f"✓ {output_path}")
+    return output_path
+
+
 def plot_evaluation_frequency_comparison(
     table1_results: dict[str, list[dict]],
     sweep_results: dict[str, dict[float, list[dict]]],
@@ -202,92 +256,27 @@ def plot_evaluation_frequency_comparison(
     *,
     n_seeds_sweep: int,
 ) -> Path:
-    """Save survival and reward-per-step curves over commanded frequency."""
+    """Save the Figure-2 reward-per-step curve over commanded frequency.
+
+    ``table1_results`` is retained for notebook/backward-call compatibility, but
+    Figure 2 intentionally contains only phase-conditioned sweep results.
+    """
+    del table1_results
     output_path = Path(output_path)
     freqs = sorted(float(f) for f in sweep_results["periodic"].keys())
 
-    def metric_value(result: dict, metric: str) -> float:
-        if metric == "reward_per_step":
-            return float(
-                result.get(
-                    "reward_per_step",
-                    result["total_reward"] / max(int(result["survival"]), 1),
-                )
-            )
-        return float(result[metric])
-
-    def means_stds(model_key: str, metric: str) -> tuple[list[float], list[float]]:
-        means = [
-            float(
-                np.mean([metric_value(r, metric) for r in sweep_results[model_key][f]])
-            )
-            for f in freqs
-        ]
-        stds = [
-            float(
-                np.std([metric_value(r, metric) for r in sweep_results[model_key][f]])
-            )
-            for f in freqs
-        ]
-        return means, stds
-
-    p_surv, p_surv_std = means_stds("periodic", "survival")
-    p_rew, p_rew_std = means_stds("periodic", "reward_per_step")
-    t_surv, t_surv_std = means_stds("trajectory", "survival")
-    t_rew, t_rew_std = means_stds("trajectory", "reward_per_step")
-    v_surv = np.array([r["survival"] for r in table1_results["vanilla"]])
-    v_rew = np.array(
-        [metric_value(r, "reward_per_step") for r in table1_results["vanilla"]]
+    p_rew, p_rew_std = _sweep_metric_summary(
+        sweep_results["periodic"], freqs, "reward_per_step", interval="std"
+    )
+    t_rew, t_rew_std = _sweep_metric_summary(
+        sweep_results["trajectory"], freqs, "reward_per_step", interval="std"
     )
 
     f_mean = float(data["freq_window_mean"])
     f_min = float(data["freq_window_min"])
     f_max = float(data["freq_window_max"])
 
-    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
-    ax = axes[0]
-    ax.errorbar(
-        freqs,
-        p_surv,
-        yerr=p_surv_std,
-        fmt="s-",
-        capsize=4,
-        linewidth=1.8,
-        markersize=7,
-        color="tab:green",
-        label="Periodic Phase",
-    )
-    ax.errorbar(
-        freqs,
-        t_surv,
-        yerr=t_surv_std,
-        fmt="o-",
-        capsize=4,
-        linewidth=2.2,
-        markersize=8,
-        color="tab:red",
-        label="Trajectory (ours)",
-    )
-    ax.errorbar(
-        [f_mean],
-        [v_surv.mean()],
-        yerr=[v_surv.std()],
-        fmt="D",
-        capsize=5,
-        markersize=10,
-        color="tab:blue",
-        label="Vanilla (no phase, ref. only)",
-    )
-    ax.axvspan(f_min, f_max, alpha=0.12, color="green", label="In-dist range")
-    ax.axvline(f_mean, color="gray", ls="--", alpha=0.4)
-    ax.set_xlabel("Sampling-time phase freq (Hz)")
-    ax.set_ylabel("Survival (steps)")
-    ax.set_title(f"Survival vs Frequency (3 in-dist + 2 OOD, n={n_seeds_sweep})")
-    ax.legend(loc="lower center", fontsize=9)
-    ax.grid(True, alpha=0.3)
-    ax.set_ylim(-50, 1080)
-
-    ax = axes[1]
+    fig, ax = plt.subplots(1, 1, figsize=(7.5, 5.0))
     ax.errorbar(
         freqs,
         p_rew,
@@ -310,16 +299,6 @@ def plot_evaluation_frequency_comparison(
         color="tab:red",
         label="Trajectory (ours)",
     )
-    ax.errorbar(
-        [f_mean],
-        [v_rew.mean()],
-        yerr=[v_rew.std()],
-        fmt="D",
-        capsize=5,
-        markersize=10,
-        color="tab:blue",
-        label="Vanilla (no phase, ref. only)",
-    )
     ax.axvspan(f_min, f_max, alpha=0.12, color="green", label="In-dist range")
     ax.axvline(f_mean, color="gray", ls="--", alpha=0.4)
     ax.set_xlabel("Sampling-time phase freq (Hz)")
@@ -330,7 +309,7 @@ def plot_evaluation_frequency_comparison(
 
     plt.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
+    plt.savefig(output_path, dpi=140, bbox_inches="tight")
     plt.show()
     print(f"✓ {output_path}")
     return output_path

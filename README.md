@@ -66,7 +66,7 @@ phase_conditioned_diffusion_policy/
 | 02 | `notebooks/02_vanilla_dp.ipynb` | phase condition이 없는 Diffusion Policy baseline을 학습하거나 checkpoint에서 로드합니다. | `checkpoints/vanilla_dp_ckpt.pt`, `figures/vanilla_dp_loss.png` |
 | 03 | `notebooks/03_phase_periodic.ipynb` | 첫 phase만 global condition으로 주는 periodic phase baseline을 학습/평가합니다. | `checkpoints/phase_periodic_ckpt.pt`, `figures/phase_periodic_loss.png` |
 | 04 | `notebooks/04_phase_trajectory.ipynb` | per-step phase trajectory를 U-Net에 주입하는 main model을 학습/평가합니다. | `checkpoints/phase_trajectory_ckpt.pt`, `figures/phase_trajectory_loss.png` |
-| 05 | `notebooks/05_evaluation.ipynb` | 세 모델을 동일 rollout protocol로 비교하고 frequency/phase controllability 결과를 저장합니다. | `results/eval_results.npz`, evaluation figures |
+| 05 | `notebooks/05_evaluation.ipynb` | 세 모델을 동일 rollout protocol로 비교하고 frequency controllability 결과를 저장합니다. | `results/eval_results.npz`, evaluation figures |
 
 ## 모듈별 역할
 
@@ -81,7 +81,7 @@ phase_conditioned_diffusion_policy/
 | `src/training.py` | DDPM epsilon-prediction training loop, EMA validation, checkpoint save/load, training-time condition extraction function을 제공합니다. |
 | `src/sampling.py` | DDIM action chunk sampling, MuJoCo Ant rollout, multi-seed evaluation, sampling-time condition extraction function을 제공합니다. |
 | `src/phase.py` | target frequency에서 phase trajectory를 생성하고, frequency sweep grid/zone 및 sweep summary를 계산합니다. |
-| `src/evaluation.py` | checkpoint 로드, in-distribution evaluation, frequency sweep, phase-offset sweep, result serialization helper를 제공합니다. |
+| `src/evaluation.py` | checkpoint 로드, in-distribution evaluation, frequency sweep, result serialization helper를 제공합니다. |
 | `src/experiment_runner.py` | notebook에서 공통으로 쓰는 data/model/scheduler/train-or-load/sample/rollout wrapper를 제공합니다. |
 | `src/experiment_plots.py` | loss curve, sampled chunk, frequency sweep, final evaluation comparison figure를 생성합니다. |
 | `src/reproducibility.py` | seed/device 설정과 project path/data summary 출력 helper를 제공합니다. |
@@ -184,11 +184,10 @@ phase[t : t + pred_horizon]        -> phase chunk
 
 ## 평가 프로토콜
 
-`05_evaluation.ipynb`는 다음 세 가지 관점으로 모델을 비교합니다.
+`05_evaluation.ipynb`는 다음 두 가지 관점으로 모델을 비교합니다.
 
 1. **In-distribution performance**: 학습 데이터의 평균 frequency에서 vanilla, periodic, trajectory 모델의 survival/reward를 비교합니다.
 2. **Frequency controllability sweep**: phase-conditioned 모델에 여러 target frequency trajectory를 주고, in-distribution/OOD frequency에서 reward와 survival을 비교합니다.
-3. **Phase-offset sweep**: 동일 frequency에서 초기 phase offset을 `0`, `π/2`, `π`, `3π/2`로 바꿔 phase condition을 실제로 활용하는지 확인합니다.
 
 결과는 `results/eval_results.npz`로 저장되고, `experiment_plots.py`의 helper로 reward-vs-frequency figure를 만들 수 있습니다.
 

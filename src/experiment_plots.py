@@ -202,27 +202,43 @@ def plot_evaluation_frequency_comparison(
     *,
     n_seeds_sweep: int,
 ) -> Path:
-    """Save the notebook-05 three-way survival/reward-vs-frequency figure."""
+    """Save survival and reward-per-step curves over commanded frequency."""
     output_path = Path(output_path)
     freqs = sorted(float(f) for f in sweep_results["periodic"].keys())
 
+    def metric_value(result: dict, metric: str) -> float:
+        if metric == "reward_per_step":
+            return float(
+                result.get(
+                    "reward_per_step",
+                    result["total_reward"] / max(int(result["survival"]), 1),
+                )
+            )
+        return float(result[metric])
+
     def means_stds(model_key: str, metric: str) -> tuple[list[float], list[float]]:
         means = [
-            float(np.mean([r[metric] for r in sweep_results[model_key][f]]))
+            float(
+                np.mean([metric_value(r, metric) for r in sweep_results[model_key][f]])
+            )
             for f in freqs
         ]
         stds = [
-            float(np.std([r[metric] for r in sweep_results[model_key][f]]))
+            float(
+                np.std([metric_value(r, metric) for r in sweep_results[model_key][f]])
+            )
             for f in freqs
         ]
         return means, stds
 
     p_surv, p_surv_std = means_stds("periodic", "survival")
-    p_rew, p_rew_std = means_stds("periodic", "total_reward")
+    p_rew, p_rew_std = means_stds("periodic", "reward_per_step")
     t_surv, t_surv_std = means_stds("trajectory", "survival")
-    t_rew, t_rew_std = means_stds("trajectory", "total_reward")
+    t_rew, t_rew_std = means_stds("trajectory", "reward_per_step")
     v_surv = np.array([r["survival"] for r in table1_results["vanilla"]])
-    v_rew = np.array([r["total_reward"] for r in table1_results["vanilla"]])
+    v_rew = np.array(
+        [metric_value(r, "reward_per_step") for r in table1_results["vanilla"]]
+    )
 
     f_mean = float(data["freq_window_mean"])
     f_min = float(data["freq_window_min"])
@@ -307,8 +323,8 @@ def plot_evaluation_frequency_comparison(
     ax.axvspan(f_min, f_max, alpha=0.12, color="green", label="In-dist range")
     ax.axvline(f_mean, color="gray", ls="--", alpha=0.4)
     ax.set_xlabel("Sampling-time phase freq (Hz)")
-    ax.set_ylabel("Total reward")
-    ax.set_title(f"Reward vs Frequency (3 in-dist + 2 OOD, n={n_seeds_sweep})")
+    ax.set_ylabel("Reward / step")
+    ax.set_title(f"Reward per step vs Frequency (3 in-dist + 2 OOD, n={n_seeds_sweep})")
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, alpha=0.3)
 
@@ -318,3 +334,181 @@ def plot_evaluation_frequency_comparison(
     plt.show()
     print(f"✓ {output_path}")
     return output_path
+
+
+def plot_frequency_tracking_alignment(
+    sweep_results: dict[str, dict[float, list[dict]]],
+    data: dict,
+    output_path: str | Path,
+    *,
+    n_seeds_sweep: int | None = None,
+    interval: str = "ci95",
+) -> Path:
+    """Plot commanded frequency against measured gait frequency.
+
+    The dashed diagonal is perfect tracking; points closer to it provide direct
+    evidence that the phase-conditioned sampler follows the requested gait
+    frequency.
+    """
+    output_path = Path(output_path)
+    freqs = sorted(float(f) for f in sweep_results["periodic"].keys())
+    fig, ax = plt.subplots(1, 1, figsize=(6.5, 5.5))
+    styles = {
+        "periodic": dict(fmt="s-", color="tab:green", label="Periodic Phase"),
+        "trajectory": dict(fmt="o-", color="tab:red", label="Trajectory (ours)"),
+    }
+    for model_key, style in styles.items():
+        means, spreads = _sweep_metric_summary(
+            sweep_results[model_key], freqs, "measured_freq_hz", interval=interval
+        )
+        ax.errorbar(
+            freqs,
+            means,
+            yerr=spreads,
+            capsize=4,
+            linewidth=2.0 if model_key == "trajectory" else 1.7,
+            markersize=8 if model_key == "trajectory" else 7,
+            **style,
+        )
+    lo = min(min(freqs), float(data["freq_window_min"]))
+    hi = max(max(freqs), float(data["freq_window_max"]))
+    pad = max((hi - lo) * 0.08, 0.02)
+    diag = np.linspace(lo - pad, hi + pad, 100)
+    ax.plot(diag, diag, "--", color="black", alpha=0.45, label="perfect tracking")
+    ax.axvspan(
+        data["freq_window_min"],
+        data["freq_window_max"],
+        alpha=0.12,
+        color="green",
+        label="In-dist range",
+    )
+    ax.axvline(float(data["freq_window_mean"]), color="gray", ls=":", alpha=0.5)
+    ax.set_xlim(lo - pad, hi + pad)
+    ax.set_ylim(lo - pad, hi + pad)
+    ax.set_xlabel("Commanded frequency (Hz)")
+    ax.set_ylabel("Measured gait frequency (Hz)")
+    suffix = f", n={n_seeds_sweep}" if n_seeds_sweep is not None else ""
+    ax.set_title(f"Frequency command tracking{suffix}")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=9)
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=140, bbox_inches="tight")
+    plt.show()
+    print(f"✓ {output_path}")
+    return output_path
+
+
+def plot_zone_aggregated_tracking_metrics(
+    freq_protocol,
+    sweep_results: dict[str, dict[float, list[dict]]],
+    output_path: str | Path,
+    *,
+    interval: str = "ci95",
+) -> Path:
+    """Save OOD/in-distribution aggregate tracking metrics by frequency zone."""
+    output_path = Path(output_path)
+    groups = _zone_frequency_groups(freq_protocol)
+    models = ["periodic", "trajectory"]
+    labels = {"periodic": "Periodic Phase", "trajectory": "Trajectory (ours)"}
+    colors = {"periodic": "tab:green", "trajectory": "tab:red"}
+    metrics = [
+        ("abs_freq_error_hz", "|Frequency error| (Hz) ↓"),
+        ("phase_locking_value", "Phase locking value ↑"),
+    ]
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.8))
+    x = np.arange(len(groups))
+    width = 0.34
+    for ax, (metric, ylabel) in zip(axes, metrics):
+        for idx, model_key in enumerate(models):
+            means = []
+            spreads = []
+            for freqs in groups.values():
+                values = []
+                for freq in freqs:
+                    values.extend(
+                        _metric_value(result, metric)
+                        for result in sweep_results[model_key][float(freq)]
+                    )
+                mean, spread = _mean_spread(values, interval=interval)
+                means.append(mean)
+                spreads.append(spread)
+            offset = (idx - 0.5) * width
+            ax.bar(
+                x + offset,
+                means,
+                width=width,
+                yerr=spreads,
+                capsize=4,
+                label=labels[model_key],
+                color=colors[model_key],
+                alpha=0.85,
+            )
+        ax.set_xticks(x)
+        ax.set_xticklabels(groups.keys())
+        ax.set_ylabel(ylabel)
+        ax.grid(True, axis="y", alpha=0.3)
+    axes[0].set_title("Tracking error by command zone")
+    axes[1].set_title("Phase locking by command zone")
+    axes[1].legend(loc="best", fontsize=9)
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=140, bbox_inches="tight")
+    plt.show()
+    print(f"✓ {output_path}")
+    return output_path
+
+
+def _sweep_metric_summary(
+    model_results: dict[float, list[dict]],
+    freqs: list[float],
+    metric: str,
+    *,
+    interval: str,
+) -> tuple[list[float], list[float]]:
+    means = []
+    spreads = []
+    for freq in freqs:
+        values = [_metric_value(result, metric) for result in model_results[freq]]
+        mean, spread = _mean_spread(values, interval=interval)
+        means.append(mean)
+        spreads.append(spread)
+    return means, spreads
+
+
+def _metric_value(result: dict, metric: str) -> float:
+    if metric == "reward_per_step":
+        return float(
+            result.get(
+                "reward_per_step",
+                result["total_reward"] / max(int(result["survival"]), 1),
+            )
+        )
+    return float(result.get(metric, np.nan))
+
+
+def _mean_spread(values, *, interval: str) -> tuple[float, float]:
+    arr = np.asarray(values, dtype=np.float32)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return float("nan"), float("nan")
+    mean = float(arr.mean())
+    std = float(arr.std())
+    if interval == "ci95":
+        return mean, float(1.96 * std / np.sqrt(float(arr.size)))
+    if interval == "std":
+        return mean, std
+    raise ValueError("interval must be 'ci95' or 'std'")
+
+
+def _zone_frequency_groups(freq_protocol) -> dict[str, list[float]]:
+    groups = {"OOD-low": [], "In-dist": [], "OOD-high": []}
+    for freq, zone in zip(freq_protocol.sweep_freqs, freq_protocol.zone_labels):
+        zone_text = str(zone)
+        if zone_text.startswith("OOD-low"):
+            groups["OOD-low"].append(float(freq))
+        elif zone_text.startswith("OOD-high"):
+            groups["OOD-high"].append(float(freq))
+        else:
+            groups["In-dist"].append(float(freq))
+    return groups

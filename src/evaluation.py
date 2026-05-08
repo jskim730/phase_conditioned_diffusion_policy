@@ -434,6 +434,319 @@ def print_frequency_sweep_summary(
             )
 
 
+PHASE_CONDITION_LABELS: dict[str, str] = {
+    "vanilla": "none",
+    "periodic": "first phase only",
+    "trajectory": "full phase trajectory",
+}
+
+
+def write_table1_summary_markdown(
+    state: EvaluationState,
+    table1_results: Mapping[str, list[dict]],
+    output_path: str | Path,
+    *,
+    freq_hz: float,
+    interval: str = "ci95",
+) -> Path:
+    """Export Table 1 as Markdown with gait-quality metrics and best values bolded.
+
+    Table 1 supports the first paper claim: the trajectory-conditioned policy
+    should preserve in-distribution locomotion quality while adding controllable
+    phase/frequency inputs.  Values are formatted as mean plus either a 95% CI
+    or standard deviation across rollout seeds.
+    """
+    output_path = Path(output_path)
+    rows = build_table1_summary_rows(
+        state, table1_results, freq_hz=freq_hz, interval=interval
+    )
+    return _write_markdown_table(
+        rows,
+        output_path,
+        title=f"Table 1. In-distribution rollout quality @ {freq_hz:.3f} Hz",
+    )
+
+
+def build_table1_summary_rows(
+    state: EvaluationState,
+    table1_results: Mapping[str, list[dict]],
+    *,
+    freq_hz: float,
+    interval: str = "ci95",
+) -> list[dict[str, str]]:
+    """Build export-ready Table 1 rows for in-distribution locomotion quality."""
+    numeric_rows: list[dict[str, object]] = []
+    vanilla_rps = metric_array(table1_results["vanilla"], "reward_per_step")
+    vanilla_rps_mean = nanmean(vanilla_rps)
+    for key in MODEL_KEYS:
+        surv, rew = result_arrays(table1_results[key])
+        rps = metric_array(table1_results[key], "reward_per_step")
+        x_vel = metric_array(table1_results[key], "mean_x_velocity")
+        numeric_rows.append(
+            {
+                "model_key": key,
+                "Model": state.model_specs[key].label,
+                "Phase condition": PHASE_CONDITION_LABELS[key],
+                "Survival ↑": _summary_cell(surv, decimals=0, interval=interval),
+                "Total reward ↑": _summary_cell(rew, decimals=1, interval=interval),
+                "Reward / step ↑": _summary_cell(rps, decimals=3, interval=interval),
+                "Mean x-velocity ↑": _summary_cell(
+                    x_vel, decimals=3, interval=interval
+                ),
+                "Δ reward/step vs Vanilla ↑": _format_delta(
+                    nanmean(rps) - vanilla_rps_mean, decimals=3
+                ),
+                "survival_mean": nanmean(surv),
+                "reward_mean": nanmean(rew),
+                "reward_per_step_mean": nanmean(rps),
+                "x_vel_mean": nanmean(x_vel),
+            }
+        )
+
+    best_by_col = {
+        "Survival ↑": _best_model_key(numeric_rows, "survival_mean", higher=True),
+        "Total reward ↑": _best_model_key(numeric_rows, "reward_mean", higher=True),
+        "Reward / step ↑": _best_model_key(
+            numeric_rows, "reward_per_step_mean", higher=True
+        ),
+        "Mean x-velocity ↑": _best_model_key(numeric_rows, "x_vel_mean", higher=True),
+    }
+    rows: list[dict[str, str]] = []
+    for row in numeric_rows:
+        formatted = {
+            key: str(row[key])
+            for key in (
+                "Model",
+                "Phase condition",
+                "Survival ↑",
+                "Total reward ↑",
+                "Reward / step ↑",
+                "Mean x-velocity ↑",
+                "Δ reward/step vs Vanilla ↑",
+            )
+        }
+        for col, best_key in best_by_col.items():
+            if row["model_key"] == best_key:
+                formatted[col] = f"**{formatted[col]}**"
+        rows.append(formatted)
+    return rows
+
+
+def write_frequency_tracking_table_markdown(
+    protocol: FrequencySweepProtocol,
+    sweep_results: Mapping[str, Mapping[float, list[dict]]],
+    output_path: str | Path,
+    *,
+    interval: str = "ci95",
+) -> Path:
+    """Export Table 2 as Markdown with tracking-first metrics.
+
+    The metric order highlights the main contribution: full phase-trajectory
+    conditioning should reduce command-frequency error and improve phase locking
+    relative to conditioning only on the first phase.
+    """
+    output_path = Path(output_path)
+    rows = build_frequency_tracking_rows(protocol, sweep_results, interval=interval)
+    return _write_markdown_table(
+        rows,
+        output_path,
+        title="Table 2. Frequency command tracking",
+    )
+
+
+def build_frequency_tracking_rows(
+    protocol: FrequencySweepProtocol,
+    sweep_results: Mapping[str, Mapping[float, list[dict]]],
+    *,
+    interval: str = "ci95",
+) -> list[dict[str, str]]:
+    """Build export-ready Table 2 rows for phase-conditioned frequency control."""
+    rows: list[dict[str, str]] = []
+    for freq, zone in zip(protocol.sweep_freqs, protocol.zone_labels):
+        freq = float(freq)
+        per_model: dict[str, dict[str, object]] = {}
+        for model_key in PHASE_MODEL_KEYS:
+            rollouts = sweep_results[model_key][freq]
+            surv, _ = result_arrays(rollouts)
+            per_model[model_key] = {
+                "Target freq (Hz)": f"{freq:.3f}",
+                "Zone": str(zone),
+                "Model": SUMMARY_MODEL_LABELS[model_key],
+                "Measured freq (Hz) ≈": _summary_cell(
+                    metric_array(rollouts, "measured_freq_hz"),
+                    decimals=3,
+                    interval=interval,
+                ),
+                "|freq error| (Hz) ↓": _summary_cell(
+                    metric_array(rollouts, "abs_freq_error_hz"),
+                    decimals=3,
+                    interval=interval,
+                ),
+                "Freq ratio ≈1": _summary_cell(
+                    metric_array(rollouts, "freq_ratio"), decimals=3, interval=interval
+                ),
+                "PLV ↑": _summary_cell(
+                    metric_array(rollouts, "phase_locking_value"),
+                    decimals=3,
+                    interval=interval,
+                ),
+                "Reward / step ↑": _summary_cell(
+                    metric_array(rollouts, "reward_per_step"),
+                    decimals=3,
+                    interval=interval,
+                ),
+                "Survival ↑": _summary_cell(surv, decimals=0, interval=interval),
+                "abs_freq_error_mean": nanmean(
+                    metric_array(rollouts, "abs_freq_error_hz")
+                ),
+                "plv_mean": nanmean(metric_array(rollouts, "phase_locking_value")),
+                "reward_per_step_mean": nanmean(
+                    metric_array(rollouts, "reward_per_step")
+                ),
+                "survival_mean": nanmean(surv),
+            }
+
+        best_error = _best_model_key(
+            [
+                {"model_key": key, "value": per_model[key]["abs_freq_error_mean"]}
+                for key in PHASE_MODEL_KEYS
+            ],
+            "value",
+            higher=False,
+        )
+        best_plv = _best_model_key(
+            [
+                {"model_key": key, "value": per_model[key]["plv_mean"]}
+                for key in PHASE_MODEL_KEYS
+            ],
+            "value",
+            higher=True,
+        )
+        best_rps = _best_model_key(
+            [
+                {"model_key": key, "value": per_model[key]["reward_per_step_mean"]}
+                for key in PHASE_MODEL_KEYS
+            ],
+            "value",
+            higher=True,
+        )
+        best_surv = _best_model_key(
+            [
+                {"model_key": key, "value": per_model[key]["survival_mean"]}
+                for key in PHASE_MODEL_KEYS
+            ],
+            "value",
+            higher=True,
+        )
+
+        for model_key in PHASE_MODEL_KEYS:
+            row = {
+                key: str(per_model[model_key][key])
+                for key in (
+                    "Target freq (Hz)",
+                    "Zone",
+                    "Model",
+                    "Measured freq (Hz) ≈",
+                    "|freq error| (Hz) ↓",
+                    "Freq ratio ≈1",
+                    "PLV ↑",
+                    "Reward / step ↑",
+                    "Survival ↑",
+                )
+            }
+            if model_key == best_error:
+                row["|freq error| (Hz) ↓"] = f"**{row['|freq error| (Hz) ↓']}**"
+            if model_key == best_plv:
+                row["PLV ↑"] = f"**{row['PLV ↑']}**"
+            if model_key == best_rps:
+                row["Reward / step ↑"] = f"**{row['Reward / step ↑']}**"
+            if model_key == best_surv:
+                row["Survival ↑"] = f"**{row['Survival ↑']}**"
+            rows.append(row)
+    return rows
+
+
+def _summary_cell(values: Sequence[object], *, decimals: int, interval: str) -> str:
+    mean, spread, _ = _summary_stats(values, interval=interval)
+    return f"{_format_float(mean, decimals)} ± {_format_float(spread, decimals)}"
+
+
+def _summary_stats(
+    values: Sequence[object], *, interval: str
+) -> tuple[float, float, int]:
+    arr = np.asarray(values, dtype=np.float32)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return float("nan"), float("nan"), 0
+    mean = float(finite.mean())
+    std = float(finite.std())
+    if interval == "ci95":
+        spread = 1.96 * std / np.sqrt(float(finite.size))
+    elif interval == "std":
+        spread = std
+    else:
+        raise ValueError("interval must be 'ci95' or 'std'")
+    return mean, float(spread), int(finite.size)
+
+
+def _format_float(value: float, decimals: int) -> str:
+    if not np.isfinite(value):
+        return "n/a"
+    return f"{value:.{decimals}f}"
+
+
+def _format_delta(value: float, *, decimals: int) -> str:
+    if not np.isfinite(value):
+        return "n/a"
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.{decimals}f}"
+
+
+def _best_model_key(
+    rows: Sequence[Mapping[str, object]], metric_key: str, *, higher: bool
+) -> str | None:
+    best_key: str | None = None
+    best_value = -np.inf if higher else np.inf
+    for row in rows:
+        value = float(row[metric_key])
+        if not np.isfinite(value):
+            continue
+        is_better = value > best_value if higher else value < best_value
+        if is_better:
+            best_value = value
+            best_key = str(row["model_key"])
+    return best_key
+
+
+def _write_markdown_table(
+    rows: Sequence[Mapping[str, str]], output_path: Path, *, title: str
+) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        output_path.write_text(f"# {title}\n\n_No rows._\n", encoding="utf-8")
+        return output_path
+    headers = list(rows[0].keys())
+    lines = [
+        f"# {title}",
+        "",
+        "| " + " | ".join(_escape_markdown_cell(header) for header in headers) + " |",
+    ]
+    lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
+    for row in rows:
+        lines.append(
+            "| "
+            + " | ".join(_escape_markdown_cell(str(row[h])) for h in headers)
+            + " |"
+        )
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"✓ {output_path}")
+    return output_path
+
+
+def _escape_markdown_cell(value: str) -> str:
+    return value.replace("|", "\\|")
+
+
 def result_arrays(
     results_list: Sequence[Mapping[str, object]],
 ) -> tuple[np.ndarray, np.ndarray]:

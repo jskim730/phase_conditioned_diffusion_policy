@@ -1,7 +1,7 @@
 """Official evaluation orchestration routines for notebook 05.
 
 The evaluation notebook should only orchestrate these functions.  Model loading,
-rollout protocol construction, frequency/phase sweeps, tabulation, and result
+rollout protocol construction, frequency sweeps, tabulation, and result
 serialization live here so the paper-quality experiment is reproducible from a
 single source module.
 """
@@ -76,15 +76,6 @@ class FrequencySweepProtocol:
     ood_freqs: np.ndarray
     sweep_freqs: np.ndarray
     zone_labels: np.ndarray
-
-
-@dataclass(frozen=True)
-class PhaseSweepProtocol:
-    """Phase-offset grid used for phase-alignment robustness evaluation."""
-
-    freq_hz: float
-    phase_offsets: np.ndarray
-    phase_labels: np.ndarray
 
 
 def load_evaluation_state(
@@ -167,7 +158,7 @@ def evaluate_model_spec_at_frequency(
     phase0: float = 0.0,
     deterministic_sampling: bool = True,
 ) -> list[dict]:
-    """Run one model spec at one target frequency/phase-offset combination.
+    """Run one model spec at one target frequency condition.
 
     This is the single-model evaluation helper used by both the official
     evaluation orchestration in this module and compatibility wrappers in
@@ -237,7 +228,7 @@ def evaluate_model_at_frequency(
     phase0: float = 0.0,
     deterministic_sampling: bool = True,
 ) -> list[dict]:
-    """Run one registered model at one target frequency/phase-offset combination."""
+    """Run one registered model at one target frequency condition."""
     return evaluate_model_spec_at_frequency(
         state.model_specs[model_key],
         freq_hz=freq_hz,
@@ -342,55 +333,6 @@ def run_frequency_sweep_evaluation(
     return all_results
 
 
-def build_phase_sweep_protocol(data: Mapping[str, object]) -> PhaseSweepProtocol:
-    """Build a fixed-frequency phase-offset grid for phase-information evaluation."""
-    phase_offsets = np.array([0.0, 0.5 * np.pi, np.pi, 1.5 * np.pi], dtype=np.float32)
-    phase_labels = np.array(["0", "pi/2", "pi", "3pi/2"])
-    return PhaseSweepProtocol(
-        freq_hz=float(data["freq_window_mean"]),
-        phase_offsets=phase_offsets,
-        phase_labels=phase_labels,
-    )
-
-
-def run_phase_sweep_evaluation(
-    state: EvaluationState,
-    protocol: PhaseSweepProtocol,
-    *,
-    env,
-    data: Mapping[str, object],
-    device: str,
-    model_keys: Sequence[str] = PHASE_MODEL_KEYS,
-    n_seeds: int,
-    max_steps: int,
-    dt: float = 0.05,
-) -> dict[str, dict[float, list[dict]]]:
-    """Run phase-offset controllability and phase-alignment robustness sweeps."""
-    all_results: dict[str, dict[float, list[dict]]] = {}
-    for model_key in model_keys:
-        print(f"=== {state.model_specs[model_key].label} phase-offset sweep ===")
-        t0 = time.time()
-        model_results: dict[float, list[dict]] = {}
-        for phase0, label in zip(protocol.phase_offsets, protocol.phase_labels):
-            phase0 = float(phase0)
-            print(f"\n--- phase0={label} rad @ f={protocol.freq_hz:.3f} Hz ---")
-            model_results[phase0] = evaluate_model_at_frequency(
-                state,
-                model_key,
-                protocol.freq_hz,
-                env=env,
-                data=data,
-                device=device,
-                n_seeds=n_seeds,
-                max_steps=max_steps,
-                dt=dt,
-                phase0=phase0,
-            )
-        print(f"\n{state.model_specs[model_key].label} phase sweep 시간: {(time.time() - t0) / 60:.1f} min\n")
-        all_results[model_key] = model_results
-    return all_results
-
-
 def print_table1_summary(state: EvaluationState, table1_results: Mapping[str, list[dict]], *, freq_hz: float) -> None:
     """Print in-distribution gait quality, not just survival/return."""
     n_seeds = len(next(iter(table1_results.values())))
@@ -459,40 +401,6 @@ def print_frequency_sweep_summary(
             )
 
 
-def print_phase_sweep_summary(
-    protocol: PhaseSweepProtocol,
-    phase_results: Mapping[str, Mapping[float, list[dict]]],
-) -> None:
-    """Print phase-offset controllability / alignment robustness diagnostics."""
-    print(f"=== Table 3: Phase-offset controllability @ f={protocol.freq_hz:.3f} Hz ===")
-    print(
-        f"{'phase0':>7s} | {'model':>18s} | {'survival':>12s} | {'reward/step':>13s} | "
-        f"{'x_vel':>11s} | {'freq_meas':>13s} | {'|phase_off_err|':>15s} | {'mean|phase_err|':>16s} | {'PLV':>9s}"
-    )
-    print("-" * 132)
-    for phase0, label in zip(protocol.phase_offsets, protocol.phase_labels):
-        phase0 = float(phase0)
-        for model_key in PHASE_MODEL_KEYS:
-            rows = phase_results[model_key][phase0]
-            surv, _ = result_arrays(rows)
-            rps = metric_array(rows, "reward_per_step")
-            x_vel = metric_array(rows, "mean_x_velocity")
-            f_meas = metric_array(rows, "measured_freq_hz")
-            phase_offset_err = metric_array(rows, "abs_phase_offset_error")
-            phase_err = metric_array(rows, "mean_abs_phase_error")
-            plv = metric_array(rows, "phase_locking_value")
-            print(
-                f"{label:>7s} | {SUMMARY_MODEL_LABELS[model_key]:>18s} | "
-                f"{surv.mean():>5.0f}±{surv.std():<4.0f} | "
-                f"{nanmean(rps):>6.3f}±{nanstd(rps):<5.3f} | "
-                f"{nanmean(x_vel):>5.3f}±{nanstd(x_vel):<5.3f} | "
-                f"{nanmean(f_meas):>6.3f}±{nanstd(f_meas):<5.3f} | "
-                f"{nanmean(phase_offset_err):>6.3f}±{nanstd(phase_offset_err):<5.3f} | "
-                f"{nanmean(phase_err):>6.3f}±{nanstd(phase_err):<5.3f} | "
-                f"{nanmean(plv):>5.3f}±{nanstd(plv):<5.3f}"
-            )
-
-
 def result_arrays(results_list: Sequence[Mapping[str, object]]) -> tuple[np.ndarray, np.ndarray]:
     """Return survival/reward arrays for one list of rollout dicts."""
     survival = np.array([r["survival"] for r in results_list], dtype=np.float32)
@@ -528,18 +436,14 @@ def build_eval_results_payload(
     table1_results: Mapping[str, list[dict]],
     freq_protocol: FrequencySweepProtocol,
     freq_results: Mapping[str, Mapping[float, list[dict]]],
-    phase_protocol: PhaseSweepProtocol,
-    phase_results: Mapping[str, Mapping[float, list[dict]]],
     *,
     n_seeds_indist: int,
     n_seeds_sweep: int,
-    n_seeds_phase: int,
 ) -> dict[str, np.ndarray]:
     """Convert raw rollout dicts into serializable arrays for ``np.savez``."""
     payload: dict[str, np.ndarray] = {
         "n_seeds_indist": np.asarray(n_seeds_indist, dtype=np.int32),
         "n_seeds_sweep": np.asarray(n_seeds_sweep, dtype=np.int32),
-        "n_seeds_phase": np.asarray(n_seeds_phase, dtype=np.int32),
         "f_mean": np.asarray(float(data["freq_window_mean"]), dtype=np.float32),
         "freq_window_min": np.asarray(float(data["freq_window_min"]), dtype=np.float32),
         "freq_window_max": np.asarray(float(data["freq_window_max"]), dtype=np.float32),
@@ -548,9 +452,6 @@ def build_eval_results_payload(
         "ood_freqs": np.asarray(freq_protocol.ood_freqs, dtype=np.float32),
         "sweep_freqs": np.asarray(freq_protocol.sweep_freqs, dtype=np.float32),
         "sweep_zone_labels": np.asarray(freq_protocol.zone_labels),
-        "phase_sweep_freq": np.asarray(phase_protocol.freq_hz, dtype=np.float32),
-        "phase_offsets": np.asarray(phase_protocol.phase_offsets, dtype=np.float32),
-        "phase_labels": np.asarray(phase_protocol.phase_labels),
     }
 
     for key in MODEL_KEYS:
@@ -560,7 +461,6 @@ def build_eval_results_payload(
         _add_metric_vectors(payload, f"table1_{key}", table1_results[key])
 
     _add_grid_results(payload, prefix="freq", grid=freq_protocol.sweep_freqs, results=freq_results)
-    _add_grid_results(payload, prefix="phase", grid=phase_protocol.phase_offsets, results=phase_results)
     return payload
 
 

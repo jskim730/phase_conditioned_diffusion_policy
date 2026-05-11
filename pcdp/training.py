@@ -8,6 +8,8 @@ import torch
 import torch.nn.functional as F
 from typing import Callable, Optional
 
+from .dataset import encode_phase_cossin
+
 
 # =====================================================================
 # Conditioning extractors — 각 단계에서 batch → (global_cond, per_step_cond) 뽑는 방식
@@ -27,14 +29,24 @@ def periodic_phase_cond_fn(batch: dict, device: str):
     """
     obs = batch['obs'].to(device, non_blocking=True)
     phase = batch['phase'].to(device, non_blocking=True)  # (B, PH)
-    phi0 = phase[:, 0:1]                                  # (B, 1)
-    phase_enc = torch.cat([torch.cos(phi0), torch.sin(phi0)], dim=-1)  # (B, 2)
+    phi0 = phase[:, 0]                                    # (B,)
+    phase_enc = encode_phase_cossin(phi0)                 # (B, 2)
     global_cond = torch.cat([obs.flatten(start_dim=1), phase_enc], dim=-1)
     return global_cond, None
 
 
-# Phase trajectory conditioning uses trajectory_phase_cond_fn below to provide
-# per-step phase features alongside the observation global condition.
+def trajectory_phase_cond_fn(batch: dict, device: str):
+    """Step 4: per-step phase trajectory conditioning.
+
+    global_cond = flattened obs window (no phase).
+    per_step_cond = (cos φ_t, sin φ_t) for each chunk step → (B, PH, 2).
+    """
+    obs = batch['obs'].to(device, non_blocking=True)
+    phase = batch['phase'].to(device, non_blocking=True)   # (B, PH)
+
+    global_cond = obs.flatten(start_dim=1)
+    per_step_cond = encode_phase_cossin(phase)             # (B, PH, 2)
+    return global_cond, per_step_cond
 
 
 # =====================================================================
@@ -244,19 +256,3 @@ def load_checkpoint(path: str | Path, model, ema, device: str = 'cuda',
         'config':         ckpt.get('config', {}),
     }
 
-#==================================================================
-def trajectory_phase_cond_fn(batch: dict, device: str):
-    """Step 4: per-step phase trajectory conditioning.
-
-    global_cond = flattened obs window (no phase).
-    per_step_cond = (cos φ_t, sin φ_t) for each chunk step → (B, PH, 2).
-    """
-    obs = batch['obs'].to(device, non_blocking=True)
-    phase = batch['phase'].to(device, non_blocking=True)   # (B, PH)
-
-    global_cond = obs.flatten(start_dim=1)
-    per_step_cond = torch.stack([
-        torch.cos(phase),
-        torch.sin(phase),
-    ], dim=-1)                                              # (B, PH, 2)
-    return global_cond, per_step_cond

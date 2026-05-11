@@ -15,33 +15,19 @@ from typing import Sequence
 
 
 # =====================================================================
-# Normalization helpers
+# Phase encoding shared by training- and sampling-time conditioning
 # =====================================================================
 
-def normalize_obs(obs: np.ndarray, obs_mean: np.ndarray, obs_std: np.ndarray) -> np.ndarray:
-    """Per-dim z-score: (obs - μ) / σ."""
-    return (obs - obs_mean) / obs_std
+def encode_phase_cossin(phase: torch.Tensor) -> torch.Tensor:
+    """Encode phase φ as ``(cos φ, sin φ)`` along a new last axis.
 
-
-def unnormalize_obs(obs_n: np.ndarray, obs_mean: np.ndarray, obs_std: np.ndarray) -> np.ndarray:
-    return obs_n * obs_std + obs_mean
-
-
-def normalize_action(act: np.ndarray, act_min: np.ndarray, act_range: np.ndarray) -> np.ndarray:
-    """Per-dim min-max → [-1, 1]."""
-    return 2.0 * (act - act_min) / act_range - 1.0
-
-
-def unnormalize_action(act_n, act_min, act_range):
-    """[-1, 1] → raw. numpy/torch 모두 지원."""
-    if isinstance(act_n, np.ndarray):
-        return (act_n + 1.0) / 2.0 * act_range + act_min
-    # torch tensor
-    if not torch.is_tensor(act_min):
-        act_min = torch.from_numpy(act_min).float().to(act_n.device)
-    if not torch.is_tensor(act_range):
-        act_range = torch.from_numpy(act_range).float().to(act_n.device)
-    return (act_n + 1.0) / 2.0 * act_range + act_min
+    Used by every phase-conditioned model so that raw phase wraparound in
+    ``[0, 2π)`` never leaks into the loss surface.  Both periodic
+    (single-step) and trajectory (per-step) variants stack along the last
+    axis: a ``(B,)`` input becomes ``(B, 2)`` and ``(B, T)`` becomes
+    ``(B, T, 2)``.
+    """
+    return torch.stack([torch.cos(phase), torch.sin(phase)], dim=-1)
 
 
 # =====================================================================
@@ -132,7 +118,7 @@ class AntPhaseDataset(Dataset):
 def _resolve_data_dir(data_dir: str | os.PathLike[str] | None = None) -> Path:
     """Return the directory containing demo and normalization artifacts."""
     if data_dir is None:
-        from paths import DATA_DIR
+        from .paths import DATA_DIR
         return DATA_DIR
 
     candidate = Path(data_dir).expanduser().resolve()

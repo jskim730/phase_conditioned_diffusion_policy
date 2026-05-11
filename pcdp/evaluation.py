@@ -16,17 +16,17 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-from configs import ExperimentConfig, get_experiment_config
-from models import count_params
-from gait_metrics import annotate_rollout_with_gait_metrics
-from phase import (
+from .configs import ExperimentConfig, get_experiment_config
+from .models import count_params
+from .phase import (
+    annotate_rollout_with_gait_metrics,
     controllability_sweep_frequencies,
     controllability_sweep_frequency_groups,
     frequency_zone,
     make_phase_trajectory_fn,
 )
-from sampling import rollout_multi_seed
-from training import load_checkpoint
+from .sampling import nanmean, nanstd, rollout_multi_seed
+from .training import load_checkpoint
 
 EVAL_CONFIG_NAMES: tuple[str, ...] = ("vanilla", "periodic_phase", "phase_trajectory")
 MODEL_KEYS: tuple[str, ...] = ("vanilla", "periodic", "trajectory")
@@ -203,27 +203,15 @@ def evaluate_model_spec_at_frequency(
         phase_trajectory_fn=phase_fn,
         device=device,
     )
-    phase_joint_idx = _phase_joint_idx_from_data(data)
     return [
         annotate_rollout_with_gait_metrics(
             result,
             command_freq_hz=freq_hz,
             dt=dt,
             phase0=phase0,
-            phase_joint_idx=phase_joint_idx,
         )
         for result in raw_results
     ]
-
-
-def _phase_joint_idx_from_data(data: Mapping[str, object], default: int = 19) -> int:
-    """Return the expert-demo phase joint index used for Hilbert phase labels."""
-    if "phase_joint_idx" in data:
-        return int(data["phase_joint_idx"])
-    demos = data.get("demos") if isinstance(data, Mapping) else None
-    if demos is not None and "phase_joint_idx" in demos:
-        return int(demos["phase_joint_idx"])
-    return int(default)
 
 
 def evaluate_model_at_frequency(
@@ -365,75 +353,6 @@ def run_frequency_sweep_evaluation(
     return all_results
 
 
-def print_table1_summary(
-    state: EvaluationState, table1_results: Mapping[str, list[dict]], *, freq_hz: float
-) -> None:
-    """Print in-distribution gait quality, not just survival/return."""
-    n_seeds = len(next(iter(table1_results.values())))
-    print(f"\n=== Table 1: In-distribution @ f={freq_hz:.3f} Hz, n={n_seeds} ===")
-    print(
-        f"{'Model':>20s} | {'Survival':>15s} | {'Reward':>17s} | "
-        f"{'Reward/Step':>17s} | {'Forward Vel.':>17s}"
-    )
-    print("-" * 96)
-    for key in MODEL_KEYS:
-        surv, rew = result_arrays(table1_results[key])
-        rps = metric_array(table1_results[key], "reward_per_step")
-        x_vel = metric_array(table1_results[key], "mean_x_velocity")
-        print(
-            f"{state.model_specs[key].label:>20s} | "
-            f"{surv.mean():>5.0f} ± {surv.std():>4.0f}    | "
-            f"{rew.mean():>7.1f} ± {rew.std():>5.1f} | "
-            f"{nanmean(rps):>7.3f} ± {nanstd(rps):>5.3f} | "
-            f"{nanmean(x_vel):>7.3f} ± {nanstd(x_vel):>5.3f}"
-        )
-
-    print("\n=== Standard Error (std/√n) ===")
-    for key in MODEL_KEYS:
-        _, rew = result_arrays(table1_results[key])
-        rps = metric_array(table1_results[key], "reward_per_step")
-        x_vel = metric_array(table1_results[key], "mean_x_velocity")
-        print(
-            f"{state.model_specs[key].label:>20s}: "
-            f"reward SE={rew.std() / np.sqrt(len(rew)):.1f}, "
-            f"reward/step SE={nanstd(rps) / np.sqrt(len(rps)):.3f}, "
-            f"x_vel SE={nanstd(x_vel) / np.sqrt(len(x_vel)):.3f}"
-        )
-
-
-def print_frequency_sweep_summary(
-    data: Mapping[str, object],
-    protocol: FrequencySweepProtocol,
-    sweep_results: Mapping[str, Mapping[float, list[dict]]],
-) -> None:
-    """Print command-frequency tracking metrics for phase-conditioned models."""
-    print("=== Table 2: Frequency command tracking ===")
-    print(
-        f"{'freq_cmd':>8s} | {'zone':>22s} | {'model':>18s} | {'survival':>12s} | "
-        f"{'reward/step':>13s} | {'x_vel':>11s} | {'freq_meas':>13s} | {'|freq_err|':>12s} | {'PLV':>9s}"
-    )
-    print("-" * 142)
-    for freq, zone in zip(protocol.sweep_freqs, protocol.zone_labels):
-        freq = float(freq)
-        for model_key in PHASE_MODEL_KEYS:
-            rows = sweep_results[model_key][freq]
-            surv, _ = result_arrays(rows)
-            rps = metric_array(rows, "reward_per_step")
-            x_vel = metric_array(rows, "mean_x_velocity")
-            f_meas = metric_array(rows, "measured_freq_hz")
-            f_err = metric_array(rows, "abs_freq_error_hz")
-            plv = metric_array(rows, "phase_locking_value")
-            print(
-                f"{freq:>8.3f} | {zone:>22s} | {SUMMARY_MODEL_LABELS[model_key]:>18s} | "
-                f"{surv.mean():>5.0f}±{surv.std():<4.0f} | "
-                f"{nanmean(rps):>6.3f}±{nanstd(rps):<5.3f} | "
-                f"{nanmean(x_vel):>5.3f}±{nanstd(x_vel):<5.3f} | "
-                f"{nanmean(f_meas):>6.3f}±{nanstd(f_meas):<5.3f} | "
-                f"{nanmean(f_err):>6.3f}±{nanstd(f_err):<5.3f} | "
-                f"{nanmean(plv):>5.3f}±{nanstd(plv):<5.3f}"
-            )
-
-
 PHASE_CONDITION_LABELS: dict[str, str] = {
     "vanilla": "none",
     "periodic": "first phase only",
@@ -441,239 +360,12 @@ PHASE_CONDITION_LABELS: dict[str, str] = {
 }
 
 
-def write_table1_summary_markdown(
-    state: EvaluationState,
-    table1_results: Mapping[str, list[dict]],
-    output_path: str | Path,
-    *,
-    freq_hz: float,
-    interval: str = "ci95",
-) -> Path:
-    """Export Table 1 as Markdown with gait-quality metrics and best values bolded.
+def summary_stats(values, *, interval: str) -> tuple[float, float, int]:
+    """Return ``(mean, spread, n_finite)`` over the finite entries of ``values``.
 
-    Table 1 supports the first paper claim: the trajectory-conditioned policy
-    should preserve in-distribution locomotion quality while adding controllable
-    phase/frequency inputs.  Values are formatted as mean plus either a 95% CI
-    or standard deviation across rollout seeds.
+    ``interval='ci95'`` returns ``1.96 σ/√n``; ``interval='std'`` returns ``σ``.
+    Shared with ``experiment_plots`` so table cells and bar/error plots agree.
     """
-    output_path = Path(output_path)
-    rows = build_table1_summary_rows(
-        state, table1_results, freq_hz=freq_hz, interval=interval
-    )
-    return _write_markdown_table(
-        rows,
-        output_path,
-        title=f"Table 1. In-distribution rollout quality @ {freq_hz:.3f} Hz",
-    )
-
-
-def build_table1_summary_rows(
-    state: EvaluationState,
-    table1_results: Mapping[str, list[dict]],
-    *,
-    freq_hz: float,
-    interval: str = "ci95",
-) -> list[dict[str, str]]:
-    """Build export-ready Table 1 rows for in-distribution locomotion quality."""
-    numeric_rows: list[dict[str, object]] = []
-    vanilla_rps = metric_array(table1_results["vanilla"], "reward_per_step")
-    vanilla_rps_mean = nanmean(vanilla_rps)
-    for key in MODEL_KEYS:
-        surv, rew = result_arrays(table1_results[key])
-        rps = metric_array(table1_results[key], "reward_per_step")
-        x_vel = metric_array(table1_results[key], "mean_x_velocity")
-        numeric_rows.append(
-            {
-                "model_key": key,
-                "Model": state.model_specs[key].label,
-                "Phase condition": PHASE_CONDITION_LABELS[key],
-                "Survival ↑": _summary_cell(surv, decimals=0, interval=interval),
-                "Total reward ↑": _summary_cell(rew, decimals=1, interval=interval),
-                "Reward / step ↑": _summary_cell(rps, decimals=3, interval=interval),
-                "Mean x-velocity ↑": _summary_cell(
-                    x_vel, decimals=3, interval=interval
-                ),
-                "Δ reward/step vs Vanilla ↑": _format_delta(
-                    nanmean(rps) - vanilla_rps_mean, decimals=3
-                ),
-                "survival_mean": nanmean(surv),
-                "reward_mean": nanmean(rew),
-                "reward_per_step_mean": nanmean(rps),
-                "x_vel_mean": nanmean(x_vel),
-            }
-        )
-
-    best_by_col = {
-        "Survival ↑": _best_model_key(numeric_rows, "survival_mean", higher=True),
-        "Total reward ↑": _best_model_key(numeric_rows, "reward_mean", higher=True),
-        "Reward / step ↑": _best_model_key(
-            numeric_rows, "reward_per_step_mean", higher=True
-        ),
-        "Mean x-velocity ↑": _best_model_key(numeric_rows, "x_vel_mean", higher=True),
-    }
-    rows: list[dict[str, str]] = []
-    for row in numeric_rows:
-        formatted = {
-            key: str(row[key])
-            for key in (
-                "Model",
-                "Phase condition",
-                "Survival ↑",
-                "Total reward ↑",
-                "Reward / step ↑",
-                "Mean x-velocity ↑",
-                "Δ reward/step vs Vanilla ↑",
-            )
-        }
-        for col, best_key in best_by_col.items():
-            if row["model_key"] == best_key:
-                formatted[col] = f"**{formatted[col]}**"
-        rows.append(formatted)
-    return rows
-
-
-def write_frequency_tracking_table_markdown(
-    protocol: FrequencySweepProtocol,
-    sweep_results: Mapping[str, Mapping[float, list[dict]]],
-    output_path: str | Path,
-    *,
-    interval: str = "ci95",
-) -> Path:
-    """Export Table 2 as Markdown with tracking-first metrics.
-
-    The metric order highlights the main contribution: full phase-trajectory
-    conditioning should reduce command-frequency error and improve phase locking
-    relative to conditioning only on the first phase.
-    """
-    output_path = Path(output_path)
-    rows = build_frequency_tracking_rows(protocol, sweep_results, interval=interval)
-    return _write_markdown_table(
-        rows,
-        output_path,
-        title="Table 2. Frequency command tracking",
-    )
-
-
-def build_frequency_tracking_rows(
-    protocol: FrequencySweepProtocol,
-    sweep_results: Mapping[str, Mapping[float, list[dict]]],
-    *,
-    interval: str = "ci95",
-) -> list[dict[str, str]]:
-    """Build export-ready Table 2 rows for phase-conditioned frequency control."""
-    rows: list[dict[str, str]] = []
-    for freq, zone in zip(protocol.sweep_freqs, protocol.zone_labels):
-        freq = float(freq)
-        per_model: dict[str, dict[str, object]] = {}
-        for model_key in PHASE_MODEL_KEYS:
-            rollouts = sweep_results[model_key][freq]
-            surv, _ = result_arrays(rollouts)
-            per_model[model_key] = {
-                "Target freq (Hz)": f"{freq:.3f}",
-                "Zone": str(zone),
-                "Model": SUMMARY_MODEL_LABELS[model_key],
-                "Measured freq (Hz) ≈": _summary_cell(
-                    metric_array(rollouts, "measured_freq_hz"),
-                    decimals=3,
-                    interval=interval,
-                ),
-                "|freq error| (Hz) ↓": _summary_cell(
-                    metric_array(rollouts, "abs_freq_error_hz"),
-                    decimals=3,
-                    interval=interval,
-                ),
-                "Freq ratio ≈1": _summary_cell(
-                    metric_array(rollouts, "freq_ratio"), decimals=3, interval=interval
-                ),
-                "PLV ↑": _summary_cell(
-                    metric_array(rollouts, "phase_locking_value"),
-                    decimals=3,
-                    interval=interval,
-                ),
-                "Reward / step ↑": _summary_cell(
-                    metric_array(rollouts, "reward_per_step"),
-                    decimals=3,
-                    interval=interval,
-                ),
-                "Survival ↑": _summary_cell(surv, decimals=0, interval=interval),
-                "abs_freq_error_mean": nanmean(
-                    metric_array(rollouts, "abs_freq_error_hz")
-                ),
-                "plv_mean": nanmean(metric_array(rollouts, "phase_locking_value")),
-                "reward_per_step_mean": nanmean(
-                    metric_array(rollouts, "reward_per_step")
-                ),
-                "survival_mean": nanmean(surv),
-            }
-
-        best_error = _best_model_key(
-            [
-                {"model_key": key, "value": per_model[key]["abs_freq_error_mean"]}
-                for key in PHASE_MODEL_KEYS
-            ],
-            "value",
-            higher=False,
-        )
-        best_plv = _best_model_key(
-            [
-                {"model_key": key, "value": per_model[key]["plv_mean"]}
-                for key in PHASE_MODEL_KEYS
-            ],
-            "value",
-            higher=True,
-        )
-        best_rps = _best_model_key(
-            [
-                {"model_key": key, "value": per_model[key]["reward_per_step_mean"]}
-                for key in PHASE_MODEL_KEYS
-            ],
-            "value",
-            higher=True,
-        )
-        best_surv = _best_model_key(
-            [
-                {"model_key": key, "value": per_model[key]["survival_mean"]}
-                for key in PHASE_MODEL_KEYS
-            ],
-            "value",
-            higher=True,
-        )
-
-        for model_key in PHASE_MODEL_KEYS:
-            row = {
-                key: str(per_model[model_key][key])
-                for key in (
-                    "Target freq (Hz)",
-                    "Zone",
-                    "Model",
-                    "Measured freq (Hz) ≈",
-                    "|freq error| (Hz) ↓",
-                    "Freq ratio ≈1",
-                    "PLV ↑",
-                    "Reward / step ↑",
-                    "Survival ↑",
-                )
-            }
-            if model_key == best_error:
-                row["|freq error| (Hz) ↓"] = f"**{row['|freq error| (Hz) ↓']}**"
-            if model_key == best_plv:
-                row["PLV ↑"] = f"**{row['PLV ↑']}**"
-            if model_key == best_rps:
-                row["Reward / step ↑"] = f"**{row['Reward / step ↑']}**"
-            if model_key == best_surv:
-                row["Survival ↑"] = f"**{row['Survival ↑']}**"
-            rows.append(row)
-    return rows
-
-
-def _summary_cell(values: Sequence[object], *, decimals: int, interval: str) -> str:
-    mean, spread, _ = _summary_stats(values, interval=interval)
-    return f"{_format_float(mean, decimals)} ± {_format_float(spread, decimals)}"
-
-
-def _summary_stats(
-    values: Sequence[object], *, interval: str
-) -> tuple[float, float, int]:
     arr = np.asarray(values, dtype=np.float32)
     finite = arr[np.isfinite(arr)]
     if finite.size == 0:
@@ -689,62 +381,165 @@ def _summary_stats(
     return mean, float(spread), int(finite.size)
 
 
-def _format_float(value: float, decimals: int) -> str:
-    if not np.isfinite(value):
+def _cell(values, *, decimals: int, interval: str) -> str:
+    mean, spread, _ = summary_stats(values, interval=interval)
+    if not np.isfinite(mean):
         return "n/a"
-    return f"{value:.{decimals}f}"
+    return f"{mean:.{decimals}f} ± {spread:.{decimals}f}"
 
 
-def _format_delta(value: float, *, decimals: int) -> str:
-    if not np.isfinite(value):
-        return "n/a"
-    sign = "+" if value >= 0 else ""
-    return f"{sign}{value:.{decimals}f}"
-
-
-def _best_model_key(
-    rows: Sequence[Mapping[str, object]], metric_key: str, *, higher: bool
-) -> str | None:
-    best_key: str | None = None
-    best_value = -np.inf if higher else np.inf
-    for row in rows:
-        value = float(row[metric_key])
-        if not np.isfinite(value):
+def _bold_best(df, columns, *, higher_is_better: bool = True) -> None:
+    """Wrap the best mean in each ``columns`` entry with markdown bold."""
+    for col in columns:
+        means = df[col].apply(lambda s: float(s.split(" ± ")[0]) if "±" in s else np.nan)
+        if not means.notna().any():
             continue
-        is_better = value > best_value if higher else value < best_value
-        if is_better:
-            best_value = value
-            best_key = str(row["model_key"])
-    return best_key
+        best_i = means.idxmax() if higher_is_better else means.idxmin()
+        df.at[best_i, col] = f"**{df.at[best_i, col]}**"
 
 
-def _write_markdown_table(
-    rows: Sequence[Mapping[str, str]], output_path: Path, *, title: str
+def _write(df, path: Path, *, title: str) -> Path:
+    """Render ``df`` as a markdown table.
+
+    ``disable_numparse=True`` keeps numeric-looking strings (``+0.770``,
+    ``1.000``) verbatim instead of letting ``tabulate`` strip trailing zeros.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    md = df.to_markdown(index=False, disable_numparse=True)
+    path.write_text(f"# {title}\n\n{md}\n", encoding="utf-8")
+    print(f"✓ {path}")
+    return path
+
+
+def write_table1_summary_markdown(
+    state: EvaluationState,
+    table1_results: Mapping[str, list[dict]],
+    output_path: str | Path,
+    *,
+    freq_hz: float,
+    interval: str = "ci95",
 ) -> Path:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
-        output_path.write_text(f"# {title}\n\n_No rows._\n", encoding="utf-8")
-        return output_path
-    headers = list(rows[0].keys())
-    lines = [
-        f"# {title}",
-        "",
-        "| " + " | ".join(_escape_markdown_cell(header) for header in headers) + " |",
-    ]
-    lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
-    for row in rows:
-        lines.append(
-            "| "
-            + " | ".join(_escape_markdown_cell(str(row[h])) for h in headers)
-            + " |"
-        )
-    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"✓ {output_path}")
-    return output_path
+    """Export Table 1 (in-distribution gait quality) with best values bolded.
+
+    Includes ``Measured freq (Hz)`` so vanilla's spontaneous gait frequency is
+    visible alongside the phase-conditioned variants.  Best values are bolded
+    on directional metrics only (the measured-freq column is a descriptor, not
+    a target to maximize, so it is left un-bolded).
+    """
+    import pandas as pd
+
+    vanilla_rps_mean = float(np.nanmean(metric_array(table1_results["vanilla"], "reward_per_step")))
+    rows = []
+    for key in MODEL_KEYS:
+        surv, _rew = result_arrays(table1_results[key])
+        rps = metric_array(table1_results[key], "reward_per_step")
+        xvel = metric_array(table1_results[key], "mean_x_velocity")
+        fmeas = metric_array(table1_results[key], "measured_freq_hz")
+        rps_delta = float(np.nanmean(rps)) - vanilla_rps_mean
+        rows.append({
+            "Model": state.model_specs[key].label,
+            "Phase condition": PHASE_CONDITION_LABELS[key],
+            "Survival ↑": _cell(surv, decimals=0, interval=interval),
+            "Reward / step ↑": _cell(rps, decimals=3, interval=interval),
+            "Mean x-velocity ↑": _cell(xvel, decimals=3, interval=interval),
+            "Measured freq (Hz)": _cell(fmeas, decimals=3, interval=interval),
+            "Δ reward/step vs Vanilla ↑": f"{rps_delta:+.3f}" if np.isfinite(rps_delta) else "n/a",
+        })
+    df = pd.DataFrame(rows)
+    _bold_best(df, ["Survival ↑", "Reward / step ↑", "Mean x-velocity ↑"],
+               higher_is_better=True)
+    return _write(df, Path(output_path),
+                  title=f"Table 1. In-distribution rollout quality @ {freq_hz:.3f} Hz")
 
 
-def _escape_markdown_cell(value: str) -> str:
-    return value.replace("|", "\\|")
+def write_frequency_tracking_table_markdown(
+    protocol: FrequencySweepProtocol,
+    sweep_results: Mapping[str, Mapping[float, list[dict]]],
+    output_path: str | Path,
+    *,
+    interval: str = "ci95",
+) -> Path:
+    """Export Table 2 (command-frequency tracking) with best values bolded per row pair.
+
+    ``Measured freq`` + ``|freq error|`` express the same tracking quality from
+    two angles, so ``Freq ratio`` is not exported.  ``Survival`` is dropped here
+    because the in-distribution analysis (Table 1) already covers survival —
+    Table 2 focuses on command-tracking metrics.
+    """
+    import pandas as pd
+
+    rows = []
+    for freq, zone in zip(protocol.sweep_freqs, protocol.zone_labels):
+        freq = float(freq)
+        for model_key in PHASE_MODEL_KEYS:
+            rollouts = sweep_results[model_key][freq]
+            rows.append({
+                "Target freq (Hz)": f"{freq:.3f}",
+                "Zone": str(zone),
+                "Model": SUMMARY_MODEL_LABELS[model_key],
+                "Measured freq (Hz)": _cell(metric_array(rollouts, "measured_freq_hz"), decimals=3, interval=interval),
+                "|freq error| (Hz) ↓": _cell(metric_array(rollouts, "abs_freq_error_hz"), decimals=3, interval=interval),
+                "PLV ↑": _cell(metric_array(rollouts, "phase_locking_value"), decimals=3, interval=interval),
+                "Reward / step ↑": _cell(metric_array(rollouts, "reward_per_step"), decimals=3, interval=interval),
+            })
+    df = pd.DataFrame(rows)
+    # Bold best per freq pair (rows 2i and 2i+1)
+    for start in range(0, len(df), len(PHASE_MODEL_KEYS)):
+        chunk = df.iloc[start:start + len(PHASE_MODEL_KEYS)]
+        _bold_best(chunk, ["|freq error| (Hz) ↓"], higher_is_better=False)
+        _bold_best(chunk, ["PLV ↑", "Reward / step ↑"], higher_is_better=True)
+        df.iloc[start:start + len(PHASE_MODEL_KEYS)] = chunk
+    return _write(df, Path(output_path), title="Table 2. Frequency command tracking")
+
+
+def print_table1_summary(
+    state: EvaluationState, table1_results: Mapping[str, list[dict]], *, freq_hz: float
+) -> None:
+    """Print Table 1 to the console using the same pandas formatting."""
+    import pandas as pd
+
+    n_seeds = len(next(iter(table1_results.values())))
+    rows = []
+    for key in MODEL_KEYS:
+        surv, _rew = result_arrays(table1_results[key])
+        rps = metric_array(table1_results[key], "reward_per_step")
+        xvel = metric_array(table1_results[key], "mean_x_velocity")
+        fmeas = metric_array(table1_results[key], "measured_freq_hz")
+        rows.append({
+            "Model": state.model_specs[key].label,
+            "Survival": _cell(surv, decimals=0, interval="std"),
+            "Reward/step": _cell(rps, decimals=3, interval="std"),
+            "Forward vel.": _cell(xvel, decimals=3, interval="std"),
+            "Measured freq": _cell(fmeas, decimals=3, interval="std"),
+        })
+    print(f"\n=== Table 1: In-distribution @ f={freq_hz:.3f} Hz, n={n_seeds} ===")
+    print(pd.DataFrame(rows).to_string(index=False))
+
+
+def print_frequency_sweep_summary(
+    data: Mapping[str, object],
+    protocol: FrequencySweepProtocol,
+    sweep_results: Mapping[str, Mapping[float, list[dict]]],
+) -> None:
+    """Print Table 2 to the console using the same pandas formatting."""
+    import pandas as pd
+
+    rows = []
+    for freq, zone in zip(protocol.sweep_freqs, protocol.zone_labels):
+        freq = float(freq)
+        for model_key in PHASE_MODEL_KEYS:
+            rollouts = sweep_results[model_key][freq]
+            rows.append({
+                "freq_cmd": f"{freq:.3f}",
+                "zone": str(zone),
+                "model": SUMMARY_MODEL_LABELS[model_key],
+                "freq_meas": _cell(metric_array(rollouts, "measured_freq_hz"), decimals=3, interval="std"),
+                "|freq_err|": _cell(metric_array(rollouts, "abs_freq_error_hz"), decimals=3, interval="std"),
+                "PLV": _cell(metric_array(rollouts, "phase_locking_value"), decimals=3, interval="std"),
+                "reward/step": _cell(metric_array(rollouts, "reward_per_step"), decimals=3, interval="std"),
+            })
+    print("=== Table 2: Frequency command tracking ===")
+    print(pd.DataFrame(rows).to_string(index=False))
 
 
 def result_arrays(
@@ -768,20 +563,6 @@ def metric_array(results_list: Sequence[Mapping[str, object]], key: str) -> np.n
     return np.asarray(values, dtype=np.float32)
 
 
-def nanmean(values: np.ndarray) -> float:
-    """NaN-safe mean that returns NaN without emitting all-NaN warnings."""
-    values = np.asarray(values, dtype=np.float32)
-    finite = values[np.isfinite(values)]
-    return float(finite.mean()) if finite.size else float("nan")
-
-
-def nanstd(values: np.ndarray) -> float:
-    """NaN-safe std that returns NaN without emitting all-NaN warnings."""
-    values = np.asarray(values, dtype=np.float32)
-    finite = values[np.isfinite(values)]
-    return float(finite.std()) if finite.size else float("nan")
-
-
 def build_eval_results_payload(
     data: Mapping[str, object],
     table1_results: Mapping[str, list[dict]],
@@ -798,7 +579,6 @@ def build_eval_results_payload(
         "f_mean": np.asarray(float(data["freq_window_mean"]), dtype=np.float32),
         "freq_window_min": np.asarray(float(data["freq_window_min"]), dtype=np.float32),
         "freq_window_max": np.asarray(float(data["freq_window_max"]), dtype=np.float32),
-        "phase_joint_idx": np.asarray(_phase_joint_idx_from_data(data), dtype=np.int32),
         "in_freqs": np.asarray(freq_protocol.in_freqs, dtype=np.float32),
         "ood_freqs": np.asarray(freq_protocol.ood_freqs, dtype=np.float32),
         "sweep_freqs": np.asarray(freq_protocol.sweep_freqs, dtype=np.float32),

@@ -1,21 +1,150 @@
-"""Gait-quality and command-tracking metrics for Ant rollouts.
+"""Phase utilities for phase-conditioned diffusion policies.
 
-These helpers intentionally reuse the same Hilbert-transform phase extraction
-used during expert-demo construction, so evaluation-time measured phase/frequency
-has the same convention as the training labels.
+This module owns both the **command side** (target phase trajectories the
+policy is told to follow) and the **measured side** (phases extracted from
+rollout observations and the metrics used to score command tracking).
+Keeping them together avoids a parallel ``gait_metrics`` module that duplicates
+the same Hilbert/frequency conventions.
 """
 
 from __future__ import annotations
 
-from typing import Mapping
+from typing import Callable, Mapping
 
 import numpy as np
 
-from data_extraction import extract_phase
+from .data_extraction import ANT_PHASE_JOINT_IDX, extract_phase
+
+PhaseTrajectoryFn = Callable[[int, int], np.ndarray]
 
 
-DEFAULT_PHASE_JOINT_IDX = 19
+# =====================================================================
+# Command side: target phase trajectory generation
+# =====================================================================
 
+def make_phase_trajectory_fn(
+    freq_hz: float, *, dt: float = 0.05, phase0: float = 0.0
+) -> PhaseTrajectoryFn:
+    """Return ``fn(start_step, horizon)`` that emits an unwrapped phase trajectory."""
+    freq_hz = float(freq_hz)
+    dt = float(dt)
+    phase0 = float(phase0)
+
+    def phase_trajectory(start_step: int, horizon: int) -> np.ndarray:
+        steps = np.arange(
+            int(start_step), int(start_step) + int(horizon), dtype=np.float32
+        )
+        return (phase0 + 2.0 * np.pi * freq_hz * steps * dt).astype(np.float32)
+
+    return phase_trajectory
+
+
+def command_phase_trajectory(
+    length: int, *, freq_hz: float, dt: float, phase0: float = 0.0
+) -> np.ndarray:
+    """Build the command phase trajectory aligned to rollout samples.
+
+    Thin wrapper over :func:`make_phase_trajectory_fn` for the common
+    "start at step 0" case used by tracking-metric computation.
+    """
+    return make_phase_trajectory_fn(freq_hz, dt=dt, phase0=phase0)(0, length)
+
+
+# =====================================================================
+# Frequency-grid helpers shared by training and evaluation notebooks
+# =====================================================================
+
+def training_frequency_triplet(data: dict) -> tuple[float, float, float]:
+    """Return ``(mean, min, max)`` frequency values from loaded project data."""
+    return (
+        float(data["freq_window_mean"]),
+        float(data["freq_window_min"]),
+        float(data["freq_window_max"]),
+    )
+
+
+def periodic_offline_frequencies(data: dict) -> tuple[list[float], list[str]]:
+    """Frequency list used for periodic-conditioning offline sample checks."""
+    f_mean, f_min, f_max = training_frequency_triplet(data)
+    f_std = float(data["freq_window_std"])
+    return (
+        [f_mean, f_min, f_max, f_mean - 3.0 * f_std, f_mean + 3.0 * f_std],
+        ["mean", "min", "max", "OOD-low", "OOD-high"],
+    )
+
+
+def trajectory_offline_frequencies(data: dict) -> tuple[list[float], list[str]]:
+    """Frequency list used for trajectory-conditioning offline sample checks."""
+    freqs, labels = periodic_offline_frequencies(data)
+    f_mean = float(data["freq_window_mean"])
+    f_std = float(data["freq_window_std"])
+    return (
+        [*freqs, f_mean - 6.0 * f_std, f_mean + 6.0 * f_std],
+        [*labels, "far-OOD-low", "far-OOD-high"],
+    )
+
+
+def controllability_sweep_frequency_groups(
+    data: dict,
+    *,
+    ood_iqr_scale: float = 1.5,
+    min_freq_hz: float = 0.2,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the 3 in-distribution + 2 IQR-based OOD Table 2 groups.
+
+    The in-distribution commands are the three interior points of a five-point
+    training-support grid, which avoids evaluating exactly at the observed
+    min/max boundaries.  The OOD commands are Tukey-style outer fences around
+    those interior commands: ``q25 - 1.5 * IQR`` and ``q75 + 1.5 * IQR`` by
+    default.
+    """
+    _, f_min, f_max = training_frequency_triplet(data)
+    support_grid = np.linspace(f_min, f_max, 5, dtype=np.float32)
+    in_freqs = support_grid[1:-1].astype(np.float32)
+
+    q25, _, q75 = [float(freq) for freq in in_freqs]
+    iqr = q75 - q25
+    ood_freqs = np.array(
+        [
+            max(float(min_freq_hz), q25 - float(ood_iqr_scale) * iqr),
+            q75 + float(ood_iqr_scale) * iqr,
+        ],
+        dtype=np.float32,
+    )
+    return in_freqs, ood_freqs
+
+
+def controllability_sweep_frequencies(
+    data: dict, *, n_in_dist: int = 3, ood_iqr_scale: float = 1.5
+) -> np.ndarray:
+    """Return the 5-frequency Table 2 sweep: OOD-low + 3 in-dist + OOD-high."""
+    if n_in_dist != 3:
+        raise ValueError(
+            "Table 2 uses exactly three interior in-distribution frequencies."
+        )
+    in_freqs, ood_freqs = controllability_sweep_frequency_groups(
+        data, ood_iqr_scale=ood_iqr_scale
+    )
+    return np.concatenate([ood_freqs[:1], in_freqs, ood_freqs[1:]]).astype(np.float32)
+
+
+def frequency_zone(freq_hz: float, data: dict, *, atol: float = 1e-6) -> str:
+    """Classify a target frequency relative to the training frequency support.
+
+    The sweep grid is usually stored as ``float32`` for compact artifacts, so
+    boundary values can round a few ULPs outside the ``float64`` dataset stats.
+    A small absolute tolerance keeps exact min/max grid points in-distribution.
+    """
+    _, f_min, f_max = training_frequency_triplet(data)
+    freq = float(freq_hz)
+    if (f_min - atol) <= freq <= (f_max + atol):
+        return "in-dist"
+    return "OOD-low" if freq < f_min else "OOD-high"
+
+
+# =====================================================================
+# Measured side: rollout phase extraction and command-tracking metrics
+# =====================================================================
 
 def circular_difference(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Return wrapped circular difference ``a - b`` in ``[-pi, pi]``."""
@@ -34,7 +163,7 @@ def circular_mean_angle(angles: np.ndarray) -> float:
 def extract_rollout_phase(
     obs_log: np.ndarray,
     *,
-    phase_joint_idx: int = DEFAULT_PHASE_JOINT_IDX,
+    phase_joint_idx: int = ANT_PHASE_JOINT_IDX,
     smooth_sigma: float = 2.0,
     min_steps: int = 20,
 ) -> tuple[np.ndarray, bool, str]:
@@ -74,12 +203,6 @@ def estimate_frequency_from_phase(phases: np.ndarray, dt: float) -> float:
         return float("nan")
     slope = np.polyfit(t, unwrapped, deg=1)[0]
     return float(slope / (2.0 * np.pi))
-
-
-def command_phase_trajectory(length: int, *, freq_hz: float, dt: float, phase0: float = 0.0) -> np.ndarray:
-    """Build the command phase trajectory aligned to rollout samples."""
-    steps = np.arange(int(length), dtype=np.float64)
-    return (float(phase0) + 2.0 * np.pi * float(freq_hz) * steps * float(dt)).astype(np.float32)
 
 
 def compute_phase_tracking_metrics(
@@ -129,7 +252,7 @@ def annotate_rollout_with_gait_metrics(
     command_freq_hz: float,
     dt: float,
     phase0: float = 0.0,
-    phase_joint_idx: int = DEFAULT_PHASE_JOINT_IDX,
+    phase_joint_idx: int = ANT_PHASE_JOINT_IDX,
     smooth_sigma: float = 2.0,
     min_duration_s: float = 2.0,
 ) -> dict:

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pcdp"
+version = "0.1.0"
+description = "Phase-Conditioned Diffusion Policy for Ant locomotion."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy",
+    "pandas",
+    "tabulate",
+    "torch",
+    "matplotlib",
+    "diffusers>=0.30,<0.32",
+    "huggingface_hub>=0.23",
+    "gymnasium[mujoco]",
+    "mujoco",
+    "minari",
+    "scipy",
+    "imageio",
+    "imageio-ffmpeg",
+]
+
+[tool.setuptools.packages.find]
+include = ["pcdp*"]

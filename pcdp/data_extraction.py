@@ -18,23 +18,20 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import hilbert
 
 
-DEFAULT_MINARI_ANT_CANDIDATES: tuple[str, ...] = (
-    "mujoco/ant/medium-replay-v0",
-    "mujoco/ant/medium-replay-v1",
-    "mujoco/ant/medium-expert-v0",
-    "mujoco/ant/expert-v0",
-    "D4RL/ant/medium-replay-v2",
-    "D4RL/ant/medium-replay-v0",
-)
+DEFAULT_MINARI_ANT_DATASET = "mujoco/ant/expert-v0"
+
+# Ant-v5 obs[19] is the hip joint position used for Hilbert phase extraction.
+# This is fixed by the MuJoCo Ant model definition, so it does not need to be
+# part of the per-dataset configuration.
+ANT_PHASE_JOINT_IDX = 19
 
 
 @dataclass(frozen=True)
 class DemoExtractionConfig:
-    """Configuration for Plan C Ant demo extraction."""
+    """Configuration for Ant demo extraction."""
 
     episode_length: int = 200
     min_episode_length: int = 200
-    phase_joint_idx: int = 19
     expected_obs_dim: int = 105
     smooth_sigma: float = 2.0
     dt: float = 0.05
@@ -45,56 +42,33 @@ class DemoExtractionConfig:
     max_episodes_to_process: int = 5000
 
 
-def list_ant_remote_datasets(minari_module: Any, max_fallback: int = 30) -> list[str]:
-    """Print and return remote Minari datasets whose name contains ``ant``."""
-    print("=== Minari에서 사용 가능한 Ant dataset ===")
-    remote = minari_module.list_remote_datasets()
-    ant_datasets = [name for name in remote.keys() if "ant" in name.lower()]
-
-    if not ant_datasets:
-        print("⚠ Ant dataset 없음. D4RL 직접 시도 필요.")
-        print("\n전체 dataset (참고):")
-        for name in list(remote.keys())[:max_fallback]:
-            print(f"  {name}")
-    else:
-        for name in ant_datasets:
-            info = remote[name]
-            print(f"  {name}")
-            if hasattr(info, "description"):
-                print(f"    {str(info.description)[:80]}")
-            if hasattr(info, "total_episodes"):
-                print(f"    episodes: {info.total_episodes}")
-    return ant_datasets
-
-
-def load_first_available_minari_dataset(
+def load_ant_dataset(
     minari_module: Any,
-    candidates: Sequence[str] = DEFAULT_MINARI_ANT_CANDIDATES,
+    name: str = DEFAULT_MINARI_ANT_DATASET,
+    *,
     download: bool = True,
-) -> tuple[Any, str | None]:
-    """Try candidate Minari dataset names in order and return the first success."""
-    dataset = None
-    used_name = None
-    for name in candidates:
-        try:
-            print(f"시도: {name}")
-            dataset = minari_module.load_dataset(name, download=download)
-            used_name = name
-            print("  ✓ 성공!")
-            break
-        except Exception as exc:  # external dataset availability differs by Minari version
-            print(f"  ✗ 실패: {str(exc)[:80]}")
+) -> Any:
+    """Load a single named Minari Ant dataset and print its size.
 
-    if dataset is None:
-        print("\n⚠ 자동 후보 모두 실패. 위 목록의 정확한 이름으로 수동 시도 필요.")
-        return None, None
+    The published pipeline uses ``mujoco/ant/expert-v0``; pass a different
+    ``name`` only if you want to reproduce against another dataset.  An
+    informative error tells you what to install if Minari can't find it.
+    """
+    try:
+        dataset = minari_module.load_dataset(name, download=download)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to load Minari dataset {name!r}. "
+            f"Check the dataset name with `minari.list_remote_datasets()` and "
+            f"ensure your Minari version supports it. Original error: {exc}"
+        ) from exc
 
-    print(f"\n=== Loaded: {used_name} ===")
+    print(f"=== Loaded: {name} ===")
     print(f"Total episodes: {dataset.total_episodes}")
     print(f"Total steps: {dataset.total_steps}")
     print(f"Observation space: {dataset.observation_space}")
     print(f"Action space: {dataset.action_space}")
-    return dataset, used_name
+    return dataset
 
 
 def materialize_episodes(dataset: Any, expected_obs_dim: int = 105, sample_size: int = 100) -> list[Any]:
@@ -156,48 +130,6 @@ def measure_phase_quality(joint_signal: np.ndarray, phases: np.ndarray, dt: floa
     }
 
 
-def compare_phase_joint_candidates(
-    episodes: Sequence[Any],
-    hip_candidates: Sequence[int] = (13, 15, 17, 19),
-    min_length: int = 200,
-    max_sample_episodes: int = 3,
-    smooth_sigma: float = 2.0,
-    dt: float = 0.05,
-) -> dict[int, list[dict[str, float]]]:
-    """Print phase-quality diagnostics for candidate Ant hip-joint observation indices."""
-    sample_eps = [ep for ep in episodes[:20] if len(ep.actions) >= min_length][:max_sample_episodes]
-    print(f"Sample episodes (length >= {min_length}): {len(sample_eps)}")
-    print("\n=== 각 sample episode + 각 hip joint별 quality ===")
-    quality_summary: dict[int, list[dict[str, float]]] = {idx: [] for idx in hip_candidates}
-
-    for ep_i, ep in enumerate(sample_eps):
-        obs_seq = np.asarray(ep.observations)[: len(ep.actions)]
-        print(f"\nEpisode {ep_i} (length {len(obs_seq)}):")
-        for joint_idx in hip_candidates:
-            if joint_idx >= obs_seq.shape[1]:
-                continue
-            sig = obs_seq[:, joint_idx]
-            ph = extract_phase(sig, smooth_sigma=smooth_sigma)
-            q = measure_phase_quality(sig, ph, dt=dt)
-            quality_summary[joint_idx].append(q)
-            print(
-                f"  joint {joint_idx}: mono={q['monotonicity']:.2f}, "
-                f"sharp={q['peak_sharpness']:.2f}, "
-                f"freq={q['estimated_freq']:.2f}Hz, "
-                f"stab={q['freq_stability']:.2f}"
-            )
-
-    print("\n=== Hip joint별 평균 quality ===")
-    for joint_idx, qualities in quality_summary.items():
-        if not qualities:
-            continue
-        mean_mono = np.mean([q["monotonicity"] for q in qualities])
-        mean_sharp = np.mean([q["peak_sharpness"] for q in qualities])
-        mean_stab = np.mean([q["freq_stability"] for q in qualities])
-        print(f"  joint {joint_idx}: mono={mean_mono:.2f}, sharp={mean_sharp:.2f}, stab={mean_stab:.2f}")
-    return quality_summary
-
-
 def quality_score(entry: dict[str, Any]) -> float:
     """Rank extracted episodes after filtering."""
     quality = entry["quality"]
@@ -222,7 +154,7 @@ def extract_demos_from_episodes(episodes: Iterable[Any], config: DemoExtractionC
 
         obs_seq = np.asarray(ep.observations)[:length, : config.expected_obs_dim]
         act_seq = np.asarray(ep.actions)[:length]
-        joint_signal = obs_seq[:, config.phase_joint_idx]
+        joint_signal = obs_seq[:, ANT_PHASE_JOINT_IDX]
         phases = extract_phase(joint_signal, smooth_sigma=config.smooth_sigma)
         quality = measure_phase_quality(joint_signal, phases, dt=config.dt)
 
@@ -292,7 +224,7 @@ def save_demos(demos: dict[str, np.ndarray], output_path: str | Path) -> Path:
 
 
 def plot_demo_quality(demos: Any, figures_dir: str | Path) -> tuple[Path, Path]:
-    """Save Plan C demo-quality histograms and representative episode plots."""
+    """Save demo-quality histograms and representative episode plots."""
     figures_dir = Path(figures_dir).expanduser().resolve()
     figures_dir.mkdir(parents=True, exist_ok=True)
 
@@ -313,13 +245,12 @@ def plot_demo_quality(demos: Any, figures_dir: str | Path) -> tuple[Path, Path]:
         ax.legend()
         ax.grid(True, alpha=0.3)
     fig.tight_layout()
-    quality_path = figures_dir / "planC_quality_dist.png"
+    quality_path = figures_dir / "data_quality_distribution.png"
     fig.savefig(quality_path, dpi=80)
     print(f"✓ 저장: {quality_path}")
     plt.show()
     plt.close(fig)
 
-    phase_joint_idx = int(demos["phase_joint_idx"]) if "phase_joint_idx" in demos else 19
     sorted_idx = np.argsort(demos["estimated_freqs"])
     sample_indices = [sorted_idx[0], sorted_idx[len(sorted_idx) // 2], sorted_idx[-1]]
 
@@ -327,7 +258,7 @@ def plot_demo_quality(demos: Any, figures_dir: str | Path) -> tuple[Path, Path]:
     for row, ep_idx in enumerate(sample_indices):
         length = int(demos["episode_lengths"][ep_idx])
         freq = float(demos["estimated_freqs"][ep_idx])
-        axes[row, 0].plot(demos["observations"][ep_idx, :length, phase_joint_idx])
+        axes[row, 0].plot(demos["observations"][ep_idx, :length, ANT_PHASE_JOINT_IDX])
         axes[row, 0].set_title(f"Ep{ep_idx}: joint signal (freq={freq:.2f}Hz)")
         axes[row, 0].grid(True)
 
@@ -342,7 +273,7 @@ def plot_demo_quality(demos: Any, figures_dir: str | Path) -> tuple[Path, Path]:
         axes[row, 2].grid(True)
 
     fig.tight_layout()
-    viz_path = figures_dir / "planC_demo_visualization.png"
+    viz_path = figures_dir / "data_demo_examples.png"
     fig.savefig(viz_path, dpi=80)
     print(f"✓ 저장: {viz_path}")
     plt.show()
@@ -351,8 +282,8 @@ def plot_demo_quality(demos: Any, figures_dir: str | Path) -> tuple[Path, Path]:
 
 
 def print_demo_quality_report(demos: Any) -> None:
-    """Print a compact quality report for extracted Plan C demos."""
-    print("=== Plan C Demo 품질 자동 평가 ===\n")
+    """Print a compact quality report for extracted demos."""
+    print("=== Demo 품질 자동 평가 ===\n")
     n_demos = len(demos["observations"])
     print(f"1. Episode 수: {n_demos}")
     print(f"   {'✓ 충분 (50+)' if n_demos >= 50 else '○ 적당 (30-50)' if n_demos >= 30 else '⚠ 부족 (<30)'}")
@@ -420,7 +351,6 @@ def _pack_selected_demos(selected: Sequence[dict[str, Any]], config: DemoExtract
         "freq_window_std": np.float32(f_std),
         "freq_window_min": np.float32(f_min),
         "freq_window_max": np.float32(f_max),
-        "phase_joint_idx": np.int32(config.phase_joint_idx),
     }
     for idx, entry in enumerate(selected):
         length = entry["length"]

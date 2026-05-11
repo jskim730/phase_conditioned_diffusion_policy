@@ -14,8 +14,8 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from configs import set_global_seed
-from dataset import build_loaders
+from .configs import set_global_seed
+from .dataset import build_loaders
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,8 @@ class DataPipelineConfig:
     action_pad_ratio: float = 0.02
 
 
-def load_demo_artifact(data_path: str | Path, *, verbose: bool = False) -> dict[str, Any]:
-    """Load a Plan C demo NPZ and expose arrays plus frequency metadata."""
+def _load_demo_artifact(data_path: str | Path, *, verbose: bool = False) -> dict[str, Any]:
+    """Load a demo NPZ and expose arrays plus frequency metadata."""
     data_path = Path(data_path).expanduser().resolve()
     assert data_path.exists(), f"파일 없음: {data_path}"
     demos = np.load(data_path)
@@ -47,15 +47,14 @@ def load_demo_artifact(data_path: str | Path, *, verbose: bool = False) -> dict[
         "freq_window_std": float(demos["freq_window_std"]),
         "freq_window_min": float(demos["freq_window_min"]),
         "freq_window_max": float(demos["freq_window_max"]),
-        "phase_joint_idx": int(demos["phase_joint_idx"]) if "phase_joint_idx" in demos else 19,
     }
     if verbose:
         print(f"Keys: {list(demos.keys())}")
-        print_demo_summary(data)
+        _print_demo_summary(data)
     return data
 
 
-def print_demo_summary(data: dict[str, Any]) -> None:
+def _print_demo_summary(data: dict[str, Any]) -> None:
     """Print episode-count and frequency metadata for a loaded demo artifact."""
     ep_lengths = data["ep_lengths"]
     print(f"Episodes: {len(ep_lengths)}, length range [{ep_lengths.min()}, {ep_lengths.max()}]")
@@ -68,7 +67,7 @@ def print_demo_summary(data: dict[str, Any]) -> None:
     print(f"In-distribution (mean ± 2σ): [{f_mean - 2 * f_std:.3f}, {f_mean + 2 * f_std:.3f}] Hz")
 
 
-def split_episodes(n_episodes: int, val_ratio: float = 0.15, seed: int = 42, *, verbose: bool = False) -> tuple[np.ndarray, np.ndarray]:
+def _split_episodes(n_episodes: int, val_ratio: float = 0.15, seed: int = 42, *, verbose: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """Create a deterministic episode-level train/validation split."""
     n_val = int(np.round(n_episodes * val_ratio))
     n_train = n_episodes - n_val
@@ -82,7 +81,7 @@ def split_episodes(n_episodes: int, val_ratio: float = 0.15, seed: int = 42, *, 
     return train_eps, val_eps
 
 
-def compute_normalization_stats(
+def _compute_normalization_stats(
     obs_data: np.ndarray,
     act_data: np.ndarray,
     ep_lengths: np.ndarray,
@@ -119,9 +118,9 @@ def compute_normalization_stats(
     }
 
 
-def build_norm_stats(data: dict[str, Any], train_eps: np.ndarray, val_eps: np.ndarray, config: DataPipelineConfig, *, verbose: bool = False) -> dict[str, np.ndarray]:
+def _build_norm_stats(data: dict[str, Any], train_eps: np.ndarray, val_eps: np.ndarray, config: DataPipelineConfig, *, verbose: bool = False) -> dict[str, np.ndarray]:
     """Build the complete norm_stats payload saved for all downstream notebooks."""
-    stats = compute_normalization_stats(
+    stats = _compute_normalization_stats(
         data["obs_data"],
         data["act_data"],
         data["ep_lengths"],
@@ -148,7 +147,7 @@ def build_norm_stats(data: dict[str, Any], train_eps: np.ndarray, val_eps: np.nd
     return stats
 
 
-def save_norm_stats(norm_stats: dict[str, np.ndarray], norm_path: str | Path) -> Path:
+def _save_norm_stats(norm_stats: dict[str, np.ndarray], norm_path: str | Path) -> Path:
     """Save normalization and split metadata as an NPZ artifact."""
     norm_path = Path(norm_path).expanduser().resolve()
     norm_path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,7 +160,7 @@ def save_norm_stats(norm_stats: dict[str, np.ndarray], norm_path: str | Path) ->
 def run_data_pipeline(data_path: str | Path, norm_path: str | Path, config: DataPipelineConfig, *, verbose: bool = False) -> dict[str, Any]:
     """Run loading, splitting, train-only stats, saving, and loader construction."""
     set_global_seed(config.seed)
-    data = load_demo_artifact(data_path, verbose=verbose)
+    data = _load_demo_artifact(data_path, verbose=verbose)
     if verbose:
         print(
             f"obs_horizon={config.obs_horizon}, pred_horizon={config.pred_horizon}, "
@@ -169,7 +168,7 @@ def run_data_pipeline(data_path: str | Path, norm_path: str | Path, config: Data
             f"batch_size={config.batch_size}, val_ratio={config.val_ratio}"
         )
 
-    train_eps, val_eps = split_episodes(data["obs_data"].shape[0], config.val_ratio, config.seed, verbose=verbose)
+    train_eps, val_eps = _split_episodes(data["obs_data"].shape[0], config.val_ratio, config.seed, verbose=verbose)
     demos = data["demos"]
     if verbose and "estimated_freqs" in demos:
         train_freqs = demos["estimated_freqs"][train_eps]
@@ -177,8 +176,8 @@ def run_data_pipeline(data_path: str | Path, norm_path: str | Path, config: Data
         print(f"\nTrain freq: mean={train_freqs.mean():.3f}, std={train_freqs.std():.3f}")
         print(f"Val freq:   mean={val_freqs.mean():.3f}, std={val_freqs.std():.3f}")
 
-    norm_stats = build_norm_stats(data, train_eps, val_eps, config, verbose=verbose)
-    save_norm_stats(norm_stats, norm_path)
+    norm_stats = _build_norm_stats(data, train_eps, val_eps, config, verbose=verbose)
+    _save_norm_stats(norm_stats, norm_path)
 
     project_data = {
         "obs_data": data["obs_data"],
@@ -227,7 +226,7 @@ def plot_phase_advance(
     seed: int = 42,
     dt: float = 0.05,
     n_check: int = 200,
-    filename: str = "data_pipeline_phase_advance.png",
+    filename: str = "data_phase_advance.png",
 ) -> dict[str, Any]:
     """Save a histogram of per-step phase advance across random chunks."""
     figures_dir = Path(figures_dir).expanduser().resolve()

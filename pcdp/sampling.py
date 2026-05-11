@@ -4,14 +4,22 @@ import numpy as np
 import torch
 from typing import Callable, Optional
 
+from .dataset import encode_phase_cossin
 
-def _nanmean_or_nan(values: np.ndarray) -> float:
+
+# =====================================================================
+# NaN-safe statistics shared by rollout summaries and evaluation tables
+# =====================================================================
+
+def nanmean(values: np.ndarray) -> float:
+    """NaN-safe mean that returns NaN without emitting all-NaN warnings."""
     finite = np.asarray(values, dtype=np.float32)
     finite = finite[np.isfinite(finite)]
     return float(finite.mean()) if finite.size else float('nan')
 
 
-def _nanstd_or_nan(values: np.ndarray) -> float:
+def nanstd(values: np.ndarray) -> float:
+    """NaN-safe std that returns NaN without emitting all-NaN warnings."""
     finite = np.asarray(values, dtype=np.float32)
     finite = finite[np.isfinite(finite)]
     return float(finite.std()) if finite.size else float('nan')
@@ -36,10 +44,26 @@ def periodic_phase_sample_cond_fn(obs_window: torch.Tensor, phase_chunk: torch.T
     """
     obs_window = obs_window.to(device)
     phase_chunk = phase_chunk.to(device)
-    phi0 = phase_chunk[:, 0:1]
-    phase_enc = torch.cat([torch.cos(phi0), torch.sin(phi0)], dim=-1)
+    phi0 = phase_chunk[:, 0]
+    phase_enc = encode_phase_cossin(phi0)
     global_cond = torch.cat([obs_window.flatten(start_dim=1), phase_enc], dim=-1)
     return global_cond, None
+
+
+def trajectory_phase_sample_cond_fn(obs_window: torch.Tensor,
+                                     phase_chunk: torch.Tensor,
+                                     device: str = 'cuda'):
+    """Step 4 sampling: per-step phase trajectory.
+
+    phase_chunk: (B, PH) — full chunk phase trajectory.
+    Returns (global_cond, per_step_cond) where per_step_cond is (B, PH, 2).
+    """
+    obs_window = obs_window.to(device)
+    phase_chunk = phase_chunk.to(device)
+
+    global_cond = obs_window.flatten(start_dim=1)
+    per_step_cond = encode_phase_cossin(phase_chunk)
+    return global_cond, per_step_cond
 
 
 # =====================================================================
@@ -225,10 +249,10 @@ def rollout(
         'total_reward': float(total_reward),
         'survival':     int(survival),
         'reward_per_step': float(total_reward / max(survival, 1)),
-        'mean_x_velocity': _nanmean_or_nan(x_velocity_arr),
-        'std_x_velocity': _nanstd_or_nan(x_velocity_arr),
+        'mean_x_velocity': nanmean(x_velocity_arr),
+        'std_x_velocity': nanstd(x_velocity_arr),
         'x_displacement': float(x_position_arr[-1] - x_position_arr[0]) if x_position_arr.size >= 2 and np.isfinite(x_position_arr[[0, -1]]).all() else float('nan'),
-        'mean_reward_forward': _nanmean_or_nan(reward_forward_arr),
+        'mean_reward_forward': nanmean(reward_forward_arr),
         'obs_log':      np.asarray(obs_log),
         'act_log':      np.asarray(act_log),
         'x_velocity_log': x_velocity_arr,
@@ -260,26 +284,6 @@ def rollout_multi_seed(model, ema, env, n_seeds: int = 5, deterministic_sampling
     print(f"\nSurvival:  mean={surv.mean():.0f} ± {surv.std():.0f} steps")
     print(f"Reward:    mean={rew.mean():.1f} ± {rew.std():.1f}")
     print(f"Reward/step: mean={rps.mean():.3f} ± {rps.std():.3f}")
-    print(f"X velocity: mean={_nanmean_or_nan(xvel):.3f} ± {_nanstd_or_nan(xvel):.3f}")
+    print(f"X velocity: mean={nanmean(xvel):.3f} ± {nanstd(xvel):.3f}")
 
     return results
-
-
-# ====================================================================
-def trajectory_phase_sample_cond_fn(obs_window: torch.Tensor,
-                                     phase_chunk: torch.Tensor,
-                                     device: str = 'cuda'):
-    """Step 4 sampling: per-step phase trajectory.
-
-    phase_chunk: (B, PH) — full chunk phase trajectory.
-    Returns (global_cond, per_step_cond) where per_step_cond is (B, PH, 2).
-    """
-    obs_window = obs_window.to(device)
-    phase_chunk = phase_chunk.to(device)
-
-    global_cond = obs_window.flatten(start_dim=1)
-    per_step_cond = torch.stack([
-        torch.cos(phase_chunk),
-        torch.sin(phase_chunk),
-    ], dim=-1)
-    return global_cond, per_step_cond

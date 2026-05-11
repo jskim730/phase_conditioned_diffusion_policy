@@ -15,9 +15,8 @@ from typing import Iterable
 PROJECT_NAME = "phase_conditioned_diffusion_policy"
 ARTIFACT_ROOT_ENV_VAR = "PCDP_ARTIFACT_ROOT"
 
-# Repository locations.  This file lives in ``<repo>/src/paths.py``.
+# Repository locations.  This file lives in ``<repo>/pcdp/paths.py``.
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_DIR = REPO_ROOT / "src"
 NOTEBOOKS_DIR = REPO_ROOT / "notebooks"
 
 # Artifact root candidates.

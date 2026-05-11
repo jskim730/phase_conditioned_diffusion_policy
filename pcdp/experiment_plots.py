@@ -8,7 +8,7 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 
-from phase import summarize_sweep_results
+from .evaluation import metric_array, summary_stats
 
 
 def plot_loss_curve(
@@ -30,26 +30,6 @@ def plot_loss_curve(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=120, bbox_inches="tight")
-    plt.show()
-    print(f"✓ {output_path}")
-    return output_path
-
-
-def plot_sample_histogram(
-    samples: np.ndarray, output_path: str | Path, *, title: str
-) -> Path:
-    """Save a histogram of normalized sampled actions."""
-    output_path = Path(output_path)
-    fig, ax = plt.subplots(1, 1, figsize=(7, 4))
-    ax.hist(samples.reshape(-1), bins=80, alpha=0.85)
-    ax.axvline(-1, color="r", ls=":", alpha=0.5)
-    ax.axvline(1, color="r", ls=":", alpha=0.5)
-    ax.set_title(title)
-    ax.set_xlabel("normalized action")
-    ax.set_ylabel("count")
-    ax.grid(True, alpha=0.2)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=120, bbox_inches="tight")
     plt.show()
@@ -104,94 +84,6 @@ def plot_action_chunks(
     plt.show()
     print(f"✓ {output_path}")
     return output_path
-
-
-def plot_frequency_sweep(
-    sweep_results: dict[float, list[dict]],
-    data: dict,
-    output_path: str | Path,
-    *,
-    title_prefix: str,
-    max_steps: int,
-) -> Path:
-    """Save survival/reward curves for a frequency sweep."""
-    output_path = Path(output_path)
-    summary = summarize_sweep_results(sweep_results)
-    f_mean = float(data["freq_window_mean"])
-    fig, axes = plt.subplots(1, 2, figsize=(14, 4))
-    axes[0].errorbar(
-        summary.freqs,
-        summary.survival_mean,
-        yerr=summary.survival_std,
-        fmt="o-",
-        capsize=5,
-        linewidth=2,
-        markersize=7,
-    )
-    axes[0].axvspan(
-        data["freq_window_min"],
-        data["freq_window_max"],
-        alpha=0.15,
-        color="green",
-        label="In-dist",
-    )
-    axes[0].axvline(f_mean, color="gray", ls="--", alpha=0.5, label="Train mean")
-    axes[0].set_xlabel("Sampling-time phase freq (Hz)")
-    axes[0].set_ylabel("Survival (steps)")
-    axes[0].set_title(f"{title_prefix}: Survival")
-    axes[0].set_ylim(0, max_steps * 1.05)
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
-
-    axes[1].errorbar(
-        summary.freqs,
-        summary.reward_mean,
-        yerr=summary.reward_std,
-        fmt="o-",
-        capsize=5,
-        linewidth=2,
-        markersize=7,
-    )
-    axes[1].axvspan(
-        data["freq_window_min"],
-        data["freq_window_max"],
-        alpha=0.15,
-        color="green",
-        label="In-dist",
-    )
-    axes[1].axvline(f_mean, color="gray", ls="--", alpha=0.5, label="Train mean")
-    axes[1].set_xlabel("Sampling-time phase freq (Hz)")
-    axes[1].set_ylabel("Total reward")
-    axes[1].set_title(f"{title_prefix}: Reward")
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
-    plt.tight_layout()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=120, bbox_inches="tight")
-    plt.show()
-    print(f"✓ {output_path}")
-    return output_path
-
-
-def print_step3_vs_step4_table(
-    step3_sweep: dict[float, dict], step4_results: dict[float, list[dict]]
-) -> None:
-    """Print a compact ablation table comparing periodic and trajectory conditioning."""
-    print(f"{'freq':>7s} | {'Step 3 (Periodic)':>30s} | {'Step 4 (Trajectory)':>30s}")
-    print(f"{'':7s} | {'surv':>10s} {'reward':>15s} | {'surv':>10s} {'reward':>15s}")
-    print("-" * 85)
-    for freq_hz in sorted(step4_results.keys()):
-        key = round(float(freq_hz), 3)
-        f3 = step3_sweep.get(key)
-        s4 = step4_results[freq_hz]
-        surv4 = np.array([r["survival"] for r in s4])
-        rew4 = np.array([r["total_reward"] for r in s4])
-        if f3 is None:
-            left = f"{'n/a':>10s} {'n/a':>15s}"
-        else:
-            left = f"{f3['survival_mean']:>10.0f} {f3['reward_mean']:>10.1f}±{f3['reward_std']:<4.1f}"
-        right = f"{surv4.mean():>10.0f} {rew4.mean():>10.1f}±{rew4.std():<4.1f}"
-        print(f"{freq_hz:7.3f} | {left} | {right}")
 
 
 def plot_table1_reward_per_step_comparison(
@@ -438,6 +330,146 @@ def plot_zone_aggregated_tracking_metrics(
     return output_path
 
 
+def plot_phase_tracking_timeseries(
+    sweep_results: dict[str, dict[float, list[dict]]],
+    freq_protocol,
+    output_path: str | Path,
+    *,
+    seed_idx: int = 0,
+    dt: float = 0.05,
+) -> Path:
+    """Plot command vs measured phase over time for a representative rollout.
+
+    Picks the in-distribution median target frequency from ``freq_protocol``
+    and shows how Periodic and Trajectory rollouts track the command phase.
+    The top row overlays unwrapped command (dashed) and measured (solid)
+    phase trajectories; the bottom row shows the wrapped phase error, which
+    is the per-step quantity averaged by the Phase Locking Value (PLV).
+
+    A flat error band in the bottom row corresponds to a high PLV, while a
+    drifting error band corresponds to a low PLV.
+    """
+    output_path = Path(output_path)
+
+    # Pick the in-distribution median freq (q50).  ``in_freqs`` has three
+    # interior commands and the middle one is the training mean's neighbour.
+    in_freqs = list(freq_protocol.in_freqs)
+    target_freq = float(in_freqs[len(in_freqs) // 2])
+
+    models = [
+        ("periodic", "Periodic Phase", "tab:green"),
+        ("trajectory", "Trajectory (ours)", "tab:red"),
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 6.5), sharex=True)
+    for col, (mkey, label, color) in enumerate(models):
+        rollout = sweep_results[mkey][target_freq][seed_idx]
+        measured = np.asarray(rollout.get("measured_phase", []), dtype=np.float64)
+        command = np.asarray(rollout.get("command_phase", []), dtype=np.float64)
+        plv = float(rollout.get("phase_locking_value", float("nan")))
+        n = min(len(measured), len(command))
+        if n < 2:
+            axes[0, col].text(0.5, 0.5, "no measured phase", ha="center", va="center")
+            axes[1, col].text(0.5, 0.5, "no measured phase", ha="center", va="center")
+            continue
+        t = np.arange(n) * float(dt)
+        measured_u = np.unwrap(measured[:n])
+        command_u = np.unwrap(command[:n])
+        # Align starting offset so both curves begin at the same value; PLV
+        # is invariant to a constant offset, so this is purely cosmetic.
+        offset = measured_u[0] - command_u[0]
+        command_aligned = command_u + offset
+
+        ax = axes[0, col]
+        ax.plot(t, command_aligned, "--", color="black", alpha=0.6, label="command (target)")
+        ax.plot(t, measured_u, "-", color=color, linewidth=1.8, label=f"measured ({label})")
+        ax.set_ylabel("Unwrapped phase (rad)")
+        ax.set_title(f"{label}  |  f_cmd={target_freq:.3f} Hz, PLV={plv:.3f}")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="lower right", fontsize=8)
+
+        phase_err = np.angle(np.exp(1j * (measured[:n] - command[:n])))
+        ax2 = axes[1, col]
+        ax2.plot(t, phase_err, color=color, linewidth=1.4)
+        ax2.axhline(0, color="black", ls=":", alpha=0.4)
+        ax2.set_ylim(-np.pi, np.pi)
+        ax2.set_yticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
+        ax2.set_yticklabels(["-π", "-π/2", "0", "π/2", "π"])
+        ax2.set_xlabel("Time (s)")
+        ax2.set_ylabel("Phase error (wrapped)")
+        ax2.grid(True, alpha=0.3)
+
+    plt.suptitle(
+        f"Phase tracking @ f_cmd={target_freq:.3f} Hz (seed {seed_idx}). "
+        f"Flat error band ⇒ high PLV.", fontsize=11
+    )
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=140, bbox_inches="tight")
+    plt.show()
+    print(f"✓ {output_path}")
+    return output_path
+
+
+PAPER_FIGURE_NAMES = {
+    "reward_per_step_comparison":  "eval_figure1_reward_per_step_comparison.png",
+    "reward_per_step_vs_freq":     "eval_figure2_reward_per_step_vs_freq.png",
+    "target_vs_measured_freq":     "eval_figure3_target_vs_measured_freq.png",
+    "zone_tracking_metrics":       "eval_figure4_zone_tracking_metrics.png",
+    "phase_tracking_timeseries":   "eval_figure5_phase_tracking_timeseries.png",
+}
+
+
+def plot_paper_figures(
+    table1_results: dict[str, list[dict]],
+    sweep_results: dict[str, dict[float, list[dict]]],
+    freq_protocol,
+    data: dict,
+    figures_dir: str | Path,
+    *,
+    n_seeds_sweep: int,
+    interval: str = "ci95",
+) -> dict[str, Path]:
+    """Emit the four paper-quality evaluation figures with standardized names.
+
+    Wraps the individual ``plot_*`` calls used by ``05_evaluation.ipynb`` so
+    the notebook stays a single-line orchestration step.  Returns the saved
+    paths keyed by ``PAPER_FIGURE_NAMES``.
+    """
+    figures_dir = Path(figures_dir)
+    paths = {}
+    paths["reward_per_step_comparison"] = plot_table1_reward_per_step_comparison(
+        table1_results,
+        figures_dir / PAPER_FIGURE_NAMES["reward_per_step_comparison"],
+        interval=interval,
+    )
+    paths["reward_per_step_vs_freq"] = plot_evaluation_frequency_comparison(
+        table1_results,
+        sweep_results,
+        data,
+        figures_dir / PAPER_FIGURE_NAMES["reward_per_step_vs_freq"],
+        n_seeds_sweep=n_seeds_sweep,
+    )
+    paths["target_vs_measured_freq"] = plot_frequency_tracking_alignment(
+        sweep_results,
+        data,
+        figures_dir / PAPER_FIGURE_NAMES["target_vs_measured_freq"],
+        n_seeds_sweep=n_seeds_sweep,
+    )
+    paths["zone_tracking_metrics"] = plot_zone_aggregated_tracking_metrics(
+        freq_protocol,
+        sweep_results,
+        figures_dir / PAPER_FIGURE_NAMES["zone_tracking_metrics"],
+        interval=interval,
+    )
+    paths["phase_tracking_timeseries"] = plot_phase_tracking_timeseries(
+        sweep_results,
+        freq_protocol,
+        figures_dir / PAPER_FIGURE_NAMES["phase_tracking_timeseries"],
+    )
+    return paths
+
+
 def _sweep_metric_summary(
     model_results: dict[float, list[dict]],
     freqs: list[float],
@@ -467,17 +499,8 @@ def _metric_value(result: dict, metric: str) -> float:
 
 
 def _mean_spread(values, *, interval: str) -> tuple[float, float]:
-    arr = np.asarray(values, dtype=np.float32)
-    arr = arr[np.isfinite(arr)]
-    if arr.size == 0:
-        return float("nan"), float("nan")
-    mean = float(arr.mean())
-    std = float(arr.std())
-    if interval == "ci95":
-        return mean, float(1.96 * std / np.sqrt(float(arr.size)))
-    if interval == "std":
-        return mean, std
-    raise ValueError("interval must be 'ci95' or 'std'")
+    mean, spread, _ = summary_stats(values, interval=interval)
+    return mean, spread
 
 
 def _zone_frequency_groups(freq_protocol) -> dict[str, list[float]]:

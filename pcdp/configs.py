@@ -124,7 +124,7 @@ class ArtifactConfig:
     def checkpoint_path(self, checkpoints_dir: str | Path | None = None) -> Path:
         """Resolve the checkpoint path under ``paths.CHECKPOINTS_DIR`` by default."""
         if checkpoints_dir is None:
-            from paths import CHECKPOINTS_DIR
+            from .paths import CHECKPOINTS_DIR
 
             checkpoints_dir = CHECKPOINTS_DIR
         return Path(checkpoints_dir).expanduser() / self.checkpoint_name
@@ -197,7 +197,7 @@ class ExperimentConfig:
 
     def resolve_model_builder(self) -> Callable[..., Any]:
         """Resolve the model builder callable lazily."""
-        from models import (
+        from .models import (
             build_periodic_phase_dp_model,
             build_phase_trajectory_dp_model,
             build_vanilla_dp_model,
@@ -212,7 +212,7 @@ class ExperimentConfig:
 
     def resolve_train_cond_fn(self) -> Callable[..., Any]:
         """Resolve the training conditioning function lazily."""
-        from training import periodic_phase_cond_fn, trajectory_phase_cond_fn, vanilla_cond_fn
+        from .training import periodic_phase_cond_fn, trajectory_phase_cond_fn, vanilla_cond_fn
 
         cond_fns = {
             "vanilla_cond_fn": vanilla_cond_fn,
@@ -223,7 +223,7 @@ class ExperimentConfig:
 
     def resolve_sample_cond_fn(self) -> Callable[..., Any]:
         """Resolve the sampling conditioning function lazily."""
-        from sampling import (
+        from .sampling import (
             periodic_phase_sample_cond_fn,
             trajectory_phase_sample_cond_fn,
             vanilla_sample_cond_fn,
@@ -354,46 +354,3 @@ def get_experiment_config(
     return config
 
 
-def _suffix_filename(filename: str, suffix: str) -> str:
-    path = Path(filename)
-    return f"{path.stem}_{suffix}{path.suffix}"
-
-
-def make_ablation_configs(
-    base_name: VariantName,
-    sweep: Mapping[str, Mapping[str, Any]],
-    *,
-    suffix_artifacts: bool = True,
-) -> dict[str, ExperimentConfig]:
-    """Create named configs for a small ablation sweep.
-
-    ``sweep`` maps run suffixes to section overrides. Section keys use dotted
-    notation such as ``"training.num_epochs"`` or ``"model.down_dims"``. By
-    default, checkpoint/plot file names are suffixed so ablation runs do not
-    overwrite the base experiment's artifacts.
-    """
-    runs: dict[str, ExperimentConfig] = {}
-    for suffix, dotted_overrides in sweep.items():
-        grouped: dict[str, dict[str, Any]] = {}
-        for dotted_key, value in dotted_overrides.items():
-            section, field = dotted_key.split(".", maxsplit=1)
-            grouped.setdefault(section, {})[field] = value
-
-        config = get_experiment_config(base_name, **grouped)
-        config = replace(
-            config,
-            name=f"{base_name}_{suffix}",
-            display_name=f"{config.display_name} ({suffix})",
-            tags=(*config.tags, "ablation", suffix),
-        )
-        if suffix_artifacts:
-            config = replace(
-                config,
-                artifacts=replace(
-                    config.artifacts,
-                    checkpoint_name=_suffix_filename(config.artifacts.checkpoint_name, suffix),
-                    loss_plot_name=_suffix_filename(config.artifacts.loss_plot_name, suffix),
-                ),
-            )
-        runs[suffix] = config
-    return runs

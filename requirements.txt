@@ -1,5 +1,7 @@
 # Core numerical and training stack
 numpy
+pandas
+tabulate
 torch
 matplotlib
 

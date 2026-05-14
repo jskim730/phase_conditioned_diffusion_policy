@@ -292,19 +292,9 @@ def print_demo_quality_report(demos: Any) -> None:
     print(f"\n2. 평균 length: {mean_len:.1f}")
     print(f"   {'✓ 우수' if mean_len >= 200 else '○ 충분' if mean_len >= 150 else '⚠ 짧음'}")
 
-    freq_std = demos["estimated_freqs"].std()
-    freq_range = demos["estimated_freqs"].max() - demos["estimated_freqs"].min()
-    print(f"\n3. Frequency 다양성: std={freq_std:.3f}, range={freq_range:.3f}")
-    print(f"   {'✓ 매우 다양' if freq_std > 0.3 else '○ 적당' if freq_std > 0.1 else '⚠ 단조'}")
-
-    print("\n4. Frequency bin별 분포:")
-    for lo, hi in [(0.5, 1.5), (1.5, 2.5), (2.5, 3.5)]:
-        count = ((demos["estimated_freqs"] >= lo) & (demos["estimated_freqs"] < hi)).sum()
-        print(f"   freq [{lo:.1f}, {hi:.1f}): {count} eps {'✓' if count >= 5 else '⚠'}")
-
     mean_mono = demos["monotonicity"].mean()
     mean_sharp = demos["peak_sharpness"].mean()
-    print(f"\n5. 평균 phase quality: mono={mean_mono:.2f}, sharp={mean_sharp:.2f}")
+    print(f"\n3. 평균 phase quality: mono={mean_mono:.2f}, sharp={mean_sharp:.2f}")
     print(f"   {'✓ 매우 깔끔' if mean_mono > 0.95 and mean_sharp > 5 else '○ 충분'}")
 
 

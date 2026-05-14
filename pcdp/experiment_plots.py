@@ -342,12 +342,9 @@ def plot_phase_tracking_timeseries(
 
     Picks the in-distribution median target frequency from ``freq_protocol``
     and shows how Periodic and Trajectory rollouts track the command phase.
-    The top row overlays unwrapped command (dashed) and measured (solid)
-    phase trajectories; the bottom row shows the wrapped phase error, which
-    is the per-step quantity averaged by the Phase Locking Value (PLV).
-
-    A flat error band in the bottom row corresponds to a high PLV, while a
-    drifting error band corresponds to a low PLV.
+    Each panel overlays unwrapped command (dashed) and measured (solid)
+    phase trajectories for one model, with the rollout PLV reported in the
+    title.
     """
     output_path = Path(output_path)
 
@@ -361,16 +358,18 @@ def plot_phase_tracking_timeseries(
         ("trajectory", "Trajectory (ours)", "tab:red"),
     ]
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 6.5), sharex=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 3.8), sharex=True)
     for col, (mkey, label, color) in enumerate(models):
         rollout = sweep_results[mkey][target_freq][seed_idx]
         measured = np.asarray(rollout.get("measured_phase", []), dtype=np.float64)
         command = np.asarray(rollout.get("command_phase", []), dtype=np.float64)
         plv = float(rollout.get("phase_locking_value", float("nan")))
         n = min(len(measured), len(command))
+        ax = axes[col]
         if n < 2:
-            axes[0, col].text(0.5, 0.5, "no measured phase", ha="center", va="center")
-            axes[1, col].text(0.5, 0.5, "no measured phase", ha="center", va="center")
+            ax.text(0.5, 0.5, "no measured phase", ha="center", va="center")
+            ax.set_title(f"{label}  |  f_cmd={target_freq:.3f} Hz")
+            ax.set_xlabel("Time (s)")
             continue
         t = np.arange(n) * float(dt)
         measured_u = np.unwrap(measured[:n])
@@ -380,28 +379,16 @@ def plot_phase_tracking_timeseries(
         offset = measured_u[0] - command_u[0]
         command_aligned = command_u + offset
 
-        ax = axes[0, col]
         ax.plot(t, command_aligned, "--", color="black", alpha=0.6, label="command (target)")
         ax.plot(t, measured_u, "-", color=color, linewidth=1.8, label=f"measured ({label})")
         ax.set_ylabel("Unwrapped phase (rad)")
         ax.set_title(f"{label}  |  f_cmd={target_freq:.3f} Hz, PLV={plv:.3f}")
+        ax.set_xlabel("Time (s)")
         ax.grid(True, alpha=0.3)
         ax.legend(loc="lower right", fontsize=8)
 
-        phase_err = np.angle(np.exp(1j * (measured[:n] - command[:n])))
-        ax2 = axes[1, col]
-        ax2.plot(t, phase_err, color=color, linewidth=1.4)
-        ax2.axhline(0, color="black", ls=":", alpha=0.4)
-        ax2.set_ylim(-np.pi, np.pi)
-        ax2.set_yticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
-        ax2.set_yticklabels(["-π", "-π/2", "0", "π/2", "π"])
-        ax2.set_xlabel("Time (s)")
-        ax2.set_ylabel("Phase error (wrapped)")
-        ax2.grid(True, alpha=0.3)
-
     plt.suptitle(
-        f"Phase tracking @ f_cmd={target_freq:.3f} Hz (seed {seed_idx}). "
-        f"Flat error band ⇒ high PLV.", fontsize=11
+        f"Phase tracking @ f_cmd={target_freq:.3f} Hz (seed {seed_idx})", fontsize=11
     )
     plt.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)

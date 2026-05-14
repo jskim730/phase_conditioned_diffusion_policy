@@ -289,7 +289,7 @@ phase[t : t + pred_horizon]        -> phase chunk
 | `eval_figure2_reward_per_step_vs_freq.png` | 5개 target frequency에서 reward/step 곡선 |
 | `eval_figure3_target_vs_measured_freq.png` | command vs measured frequency 산점도 + 대각선 (perfect tracking) |
 | `eval_figure4_zone_tracking_metrics.png` | OOD/in-dist zone 별 |freq error| + PLV 막대 |
-| `eval_figure5_phase_tracking_timeseries.png` | 대표 rollout의 phase 시계열 + wrapped error (PLV 시각화) |
+| `eval_figure5_phase_tracking_timeseries.png` | 대표 rollout의 command/measured phase 시계열 |
 
 결과 원본 array는 `results/eval_results.npz`에 저장됩니다.
 

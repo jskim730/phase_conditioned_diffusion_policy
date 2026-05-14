@@ -53,6 +53,7 @@ phase_conditioned_diffusion_policy/
 ├── pyproject.toml
 ├── requirements.txt
 ├── notebooks/
+│   ├── 00_colab_setup.ipynb
 │   ├── 01_data_preparation.ipynb
 │   ├── 02_vanilla_dp.ipynb
 │   ├── 03_phase_periodic.ipynb
@@ -79,6 +80,8 @@ phase_conditioned_diffusion_policy/
 처음 실행하는 경우 아래 notebook 순서대로 진행하면 됩니다.
 
 ```text
+00_colab_setup.ipynb  (Colab fresh runtime only)
+    ↓
 01_data_preparation.ipynb
     ↓
 02_vanilla_dp.ipynb
@@ -92,6 +95,7 @@ phase_conditioned_diffusion_policy/
 
 | 순서 | Notebook | 역할 | 주요 산출물 |
 |---:|---|---|---|
+| 00 | `notebooks/00_colab_setup.ipynb` | Colab fresh runtime에서 repo clone, repo-root 이동, MuJoCo/OSMesa system package 설치, editable install, rendering env, artifact root를 한 번에 설정합니다. | configured Colab runtime, `PCDP_ARTIFACT_ROOT` |
 | 01 | `notebooks/01_data_preparation.ipynb` | Minari Ant dataset에서 phase-label demo를 추출하고, train/val split + train-only normalization stats를 저장합니다. | `data/demos_ant.npz`, `data/norm_stats.npz`, quality/diagnostic figure |
 | 02 | `notebooks/02_vanilla_dp.ipynb` | phase condition이 없는 Diffusion Policy baseline을 학습하거나 checkpoint에서 로드합니다. | `checkpoints/vanilla_dp_ckpt.pt`, `figures/vanilla_dp_loss.png` |
 | 03 | `notebooks/03_phase_periodic.ipynb` | 첫 phase만 global condition으로 주는 periodic phase baseline을 학습/평가합니다. | `checkpoints/phase_periodic_ckpt.pt`, `figures/phase_periodic_loss.png` |
@@ -141,20 +145,34 @@ from pcdp.paths import DATA_DIR, CHECKPOINTS_DIR, FIGURES_DIR, ensure_artifact_d
 ensure_artifact_dirs()
 ```
 
-Colab에서 MuJoCo 렌더링을 사용하려면 system package를 한 번 설치해야 합니다.
+### Colab fresh runtime
 
-```bash
-apt-get update -qq
-apt-get install -y libosmesa6-dev libgl1-mesa-glx libglfw3 patchelf --quiet
+새 Colab 런타임에서는 먼저 `notebooks/00_colab_setup.ipynb`를 실행합니다. 이 setup notebook은 아래 작업을 순서대로 수행합니다.
+
+1. `/content/phase_conditioned_diffusion_policy`가 없으면 GitHub repository를 clone합니다. 기본 placeholder URL을 실제 GitHub clone URL로 바꾸거나 `PCDP_REPO_URL` 환경변수를 설정하세요.
+2. `%cd /content/phase_conditioned_diffusion_policy`로 repo root에 진입합니다.
+3. MuJoCo/OSMesa 렌더링에 필요한 system package를 설치합니다: `libosmesa6-dev`, `libgl1-mesa-glx`, `libglfw3`, `patchelf`.
+4. repo root 기준으로 `pip install -e .`를 실행합니다.
+5. `MUJOCO_GL=osmesa`, `PYOPENGL_PLATFORM=osmesa`를 설정합니다.
+6. Google Drive mount 여부를 `USE_GOOGLE_DRIVE` 값으로 선택하고, `PCDP_ARTIFACT_ROOT`를 명시적으로 설정합니다.
+
+Colab에서의 전체 실행 순서는 다음과 같습니다.
+
+```text
+00_colab_setup.ipynb
+    ↓
+01_data_preparation.ipynb
+    ↓
+02_vanilla_dp.ipynb
+    ↓
+03_phase_periodic.ipynb
+    ↓
+04_phase_trajectory.ipynb
+    ↓
+05_evaluation.ipynb
 ```
 
-또한 노트북 첫 셀에서 OSMesa backend를 지정합니다.
-
-```python
-import os
-os.environ['MUJOCO_GL'] = 'osmesa'
-os.environ['PYOPENGL_PLATFORM'] = 'osmesa'
-```
+`01_data_preparation.ipynb`부터 `05_evaluation.ipynb`까지는 공통 bootstrap cell이 현재 실행 환경이 Colab인지 확인하고, repo root를 탐색한 뒤 repo root 기준으로 editable install을 수행합니다. 따라서 Colab에서는 `00_colab_setup.ipynb`를 먼저 실행하는 방식을 권장하고, 로컬 Jupyter에서는 repository 안에서 notebook server를 시작하면 됩니다.
 
 ## Artifact 경로 규칙
 

@@ -143,16 +143,15 @@ ensure_artifact_dirs()
 
 ### Colab runtime assumptions
 
-노트북은 더 이상 Colab bootstrap을 자동 수행하지 않습니다. 재현 실행 전에 사용자가 아래 작업을 직접 완료했다고 가정합니다.
+각 노트북의 첫 번째 셀은 Colab에서 Google Drive를 mount한 뒤 기본 repository 위치인 `/content/drive/MyDrive/phase_conditioned_diffusion_policy`로 작업 디렉터리를 이동합니다. repository를 다른 Drive 경로에 두었다면 첫 셀의 `PROJECT_DIR` 값을 해당 경로로 수정하세요. 로컬/Jupyter 환경에서는 Colab 전용 mount를 건너뛰고 현재 작업 디렉터리를 유지합니다.
 
-1. 필요한 경우 Google Drive를 mount합니다.
-2. repository를 준비하고, 현재 작업 디렉터리를 repository root(`pyproject.toml`과 `pcdp/`가 있는 폴더)로 이동합니다.
-3. MuJoCo/OSMesa 렌더링이 필요하면 system package를 설치합니다: `libosmesa6-dev`, `libgl1-mesa-glx`, `libglfw3`, `patchelf`.
-4. repository root 기준으로 dependency를 설치합니다: `pip install -e .`.
-5. MuJoCo headless rendering이 필요하면 notebook 실행 전에 `MUJOCO_GL=osmesa`, `PYOPENGL_PLATFORM=osmesa`를 설정합니다.
-6. 필요하면 notebook 실행 전에 `PCDP_ARTIFACT_ROOT`를 원하는 artifact 경로로 설정합니다. 설정하지 않으면 `<repo>/artifacts`가 사용됩니다.
+재현 실행 전에 사용자가 아래 작업을 완료했다고 가정합니다.
 
-`01_data_preparation.ipynb`부터 `05_evaluation.ipynb`까지는 Colab clone, Drive mount, `chdir`, package install, runtime check를 수행하지 않고 곧바로 artifact 경로와 실험 로직을 실행합니다.
+1. Google Drive 안에 repository를 준비합니다.
+2. MuJoCo/OSMesa 렌더링이 필요하면 system package를 설치합니다: `libosmesa6-dev`, `libgl1-mesa-glx`, `libglfw3`, `patchelf`.
+3. repository root 기준으로 dependency를 설치합니다: `pip install -e .`.
+4. MuJoCo headless rendering이 필요하면 notebook 실행 전에 `MUJOCO_GL=osmesa`, `PYOPENGL_PLATFORM=osmesa`를 설정합니다.
+5. 필요하면 notebook 실행 전에 `PCDP_ARTIFACT_ROOT`를 원하는 artifact 경로로 설정합니다. 설정하지 않으면 `<repo>/artifacts`가 사용됩니다.
 
 ## Artifact 경로 규칙
 

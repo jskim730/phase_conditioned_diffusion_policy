@@ -2,7 +2,7 @@
 
 Notebook cells should import one named :class:`ExperimentConfig` instead of
 hand-editing scattered constants.  The config objects are intentionally plain
-Python dataclasses so they work in Colab without an extra YAML/OmegaConf
+Python dataclasses so they work in notebooks without an extra YAML/OmegaConf
 runtime dependency, while still being easy to serialize into checkpoints.
 """
 

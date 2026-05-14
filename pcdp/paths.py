@@ -1,8 +1,9 @@
 """Project path utilities for reproducible artifact storage.
 
-The source tree (``src/`` and ``notebooks/``) can stay in the cloned GitHub
-repository while generated artifacts live in a user-controlled workspace.
-Set ``PCDP_ARTIFACT_ROOT`` to override the default location.
+Generated artifacts default to the repository-local ``artifacts/`` directory so
+Colab and local runs behave the same once the user has selected the repository
+root as the current working directory.  Set ``PCDP_ARTIFACT_ROOT`` to override
+that default, for example to point at a separate Google Drive folder.
 """
 
 from __future__ import annotations
@@ -20,18 +21,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOKS_DIR = REPO_ROOT / "notebooks"
 
 # Artifact root candidates.
-COLAB_DRIVE_ROOT = Path("/content/drive/MyDrive") / PROJECT_NAME
-LOCAL_ARTIFACT_ROOT = Path.home() / f"{PROJECT_NAME}_artifacts"
+PROJECT_ARTIFACT_ROOT = REPO_ROOT / "artifacts"
 
 
 def _expand_path(path: str | os.PathLike[str]) -> Path:
     """Return an absolute, user-expanded path without creating it."""
     return Path(path).expanduser().resolve()
-
-
-def _google_drive_is_mounted() -> bool:
-    """Return True when a Colab Google Drive mount is available."""
-    return COLAB_DRIVE_ROOT.parent.exists()
 
 
 def resolve_artifact_root(path: str | os.PathLike[str] | None = None) -> Path:
@@ -40,8 +35,7 @@ def resolve_artifact_root(path: str | os.PathLike[str] | None = None) -> Path:
     Priority order:
     1. Explicit ``path`` argument.
     2. ``PCDP_ARTIFACT_ROOT`` environment variable.
-    3. Google Drive under Colab when ``/content/drive/MyDrive`` is mounted.
-    4. Local fallback under the user's home directory.
+    3. Repository-local ``artifacts/`` directory.
     """
     if path is not None:
         return _expand_path(path)
@@ -50,10 +44,7 @@ def resolve_artifact_root(path: str | os.PathLike[str] | None = None) -> Path:
     if env_path:
         return _expand_path(env_path)
 
-    if _google_drive_is_mounted():
-        return COLAB_DRIVE_ROOT
-
-    return LOCAL_ARTIFACT_ROOT
+    return PROJECT_ARTIFACT_ROOT
 
 
 ARTIFACT_ROOT = resolve_artifact_root()

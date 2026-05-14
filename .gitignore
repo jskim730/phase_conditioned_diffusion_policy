@@ -243,6 +243,9 @@ MyDrive/
 content/
 .local/
 
+# Generated artifacts
+artifacts/
+
 # Dataset / rollout files
 data/
 datasets/

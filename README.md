@@ -1,6 +1,6 @@
 # Phase-Conditioned Diffusion Policy
 
-Ant locomotion demonstration에 post-hoc 보행 phase label을 붙이고, Diffusion Policy가 **원하는 phase/frequency trajectory**를 따라 action chunk를 생성할 수 있는지 검증하는 연구용 코드베이스입니다. 프로젝트는 Colab/로컬에서 동일한 `pcdp/` 패키지를 사용하도록 구성되어 있으며, notebook은 실험 흐름을 실행하는 얇은 orchestration layer 역할을 합니다.
+Ant locomotion demonstration에 post-hoc 보행 phase label을 붙이고, Diffusion Policy가 **원하는 phase/frequency trajectory**를 따라 action chunk를 생성할 수 있는지 검증하는 연구용 코드베이스입니다. 프로젝트는 사용자가 Colab/로컬에서 이미 repository root를 작업 디렉터리로 지정했다고 가정하며, notebook은 실험 흐름을 실행하는 얇은 orchestration layer 역할을 합니다.
 
 ## 핵심 아이디어
 
@@ -53,7 +53,6 @@ phase_conditioned_diffusion_policy/
 ├── pyproject.toml
 ├── requirements.txt
 ├── notebooks/
-│   ├── 00_colab_setup.ipynb
 │   ├── 01_data_preparation.ipynb
 │   ├── 02_vanilla_dp.ipynb
 │   ├── 03_phase_periodic.ipynb
@@ -77,11 +76,9 @@ phase_conditioned_diffusion_policy/
 
 ## 전체 실행 흐름
 
-처음 실행하는 경우 아래 notebook 순서대로 진행하면 됩니다.
+처음 실행하는 경우 사용자가 먼저 Colab Drive mount(필요 시), dependency 설치, repository root로 작업 디렉터리 이동을 완료했다고 가정합니다. 그 다음 아래 notebook 순서대로 진행하면 됩니다.
 
 ```text
-00_colab_setup.ipynb  (Colab fresh runtime only)
-    ↓
 01_data_preparation.ipynb
     ↓
 02_vanilla_dp.ipynb
@@ -95,7 +92,6 @@ phase_conditioned_diffusion_policy/
 
 | 순서 | Notebook | 역할 | 주요 산출물 |
 |---:|---|---|---|
-| 00 | `notebooks/00_colab_setup.ipynb` | Colab fresh runtime에서 repo clone, repo-root 이동, MuJoCo/OSMesa system package 설치, editable install, rendering env, artifact root를 한 번에 설정합니다. | configured Colab runtime, `PCDP_ARTIFACT_ROOT` |
 | 01 | `notebooks/01_data_preparation.ipynb` | Minari Ant dataset에서 phase-label demo를 추출하고, train/val split + train-only normalization stats를 저장합니다. | `data/demos_ant.npz`, `data/norm_stats.npz`, quality/diagnostic figure |
 | 02 | `notebooks/02_vanilla_dp.ipynb` | phase condition이 없는 Diffusion Policy baseline을 학습하거나 checkpoint에서 로드합니다. | `checkpoints/vanilla_dp_ckpt.pt`, `figures/vanilla_dp_loss.png` |
 | 03 | `notebooks/03_phase_periodic.ipynb` | 첫 phase만 global condition으로 주는 periodic phase baseline을 학습/평가합니다. | `checkpoints/phase_periodic_ckpt.pt`, `figures/phase_periodic_loss.png` |
@@ -106,7 +102,7 @@ phase_conditioned_diffusion_policy/
 
 | 파일 | 설명 |
 |---|---|
-| `pcdp.paths` | repository root, notebook directory, artifact root와 `data/`, `checkpoints/`, `results/`, `figures/`, `videos/` 디렉터리를 일관되게 해석합니다. `PCDP_ARTIFACT_ROOT` 환경변수 또는 Google Drive mount를 우선 사용합니다. |
+| `pcdp.paths` | repository root, notebook directory, artifact root와 `data/`, `checkpoints/`, `results/`, `figures/`, `videos/` 디렉터리를 일관되게 해석합니다. `PCDP_ARTIFACT_ROOT` 환경변수가 없으면 repository-local `artifacts/`를 사용합니다. |
 | `pcdp.configs` | `vanilla`, `periodic_phase`, `phase_trajectory` named experiment config와 `set_global_seed` helper를 정의합니다. 모델 builder, condition function, scheduler, EMA, checkpoint 이름이 여기에서 연결됩니다. |
 | `pcdp.data_extraction` | Minari Ant dataset discovery, episode materialization, Hilbert transform phase extraction, phase quality filtering, demo 저장 및 diagnostic plot 생성을 담당합니다. |
 | `pcdp.data_pipeline` | `demos_ant.npz`를 train/val episode로 분할하고 observation/action normalization stats 및 frequency 메타데이터를 `norm_stats.npz`로 저장합니다. |
@@ -145,47 +141,30 @@ from pcdp.paths import DATA_DIR, CHECKPOINTS_DIR, FIGURES_DIR, ensure_artifact_d
 ensure_artifact_dirs()
 ```
 
-### Colab fresh runtime
+### Colab runtime assumptions
 
-새 Colab 런타임에서는 먼저 `notebooks/00_colab_setup.ipynb`를 실행합니다. 이 setup notebook은 아래 작업을 순서대로 수행합니다.
+노트북은 더 이상 Colab bootstrap을 자동 수행하지 않습니다. 재현 실행 전에 사용자가 아래 작업을 직접 완료했다고 가정합니다.
 
-1. `/content/phase_conditioned_diffusion_policy`가 없으면 GitHub repository를 clone합니다. 기본 placeholder URL을 실제 GitHub clone URL로 바꾸거나 `PCDP_REPO_URL` 환경변수를 설정하세요.
-2. `%cd /content/phase_conditioned_diffusion_policy`로 repo root에 진입합니다.
-3. MuJoCo/OSMesa 렌더링에 필요한 system package를 설치합니다: `libosmesa6-dev`, `libgl1-mesa-glx`, `libglfw3`, `patchelf`.
-4. repo root 기준으로 `pip install -e .`를 실행합니다.
-5. `MUJOCO_GL=osmesa`, `PYOPENGL_PLATFORM=osmesa`를 설정합니다.
-6. Google Drive mount 여부를 `USE_GOOGLE_DRIVE` 값으로 선택하고, `PCDP_ARTIFACT_ROOT`를 명시적으로 설정합니다.
+1. 필요한 경우 Google Drive를 mount합니다.
+2. repository를 준비하고, 현재 작업 디렉터리를 repository root(`pyproject.toml`과 `pcdp/`가 있는 폴더)로 이동합니다.
+3. MuJoCo/OSMesa 렌더링이 필요하면 system package를 설치합니다: `libosmesa6-dev`, `libgl1-mesa-glx`, `libglfw3`, `patchelf`.
+4. repository root 기준으로 dependency를 설치합니다: `pip install -e .`.
+5. MuJoCo headless rendering이 필요하면 notebook 실행 전에 `MUJOCO_GL=osmesa`, `PYOPENGL_PLATFORM=osmesa`를 설정합니다.
+6. 필요하면 notebook 실행 전에 `PCDP_ARTIFACT_ROOT`를 원하는 artifact 경로로 설정합니다. 설정하지 않으면 `<repo>/artifacts`가 사용됩니다.
 
-Colab에서의 전체 실행 순서는 다음과 같습니다.
-
-```text
-00_colab_setup.ipynb
-    ↓
-01_data_preparation.ipynb
-    ↓
-02_vanilla_dp.ipynb
-    ↓
-03_phase_periodic.ipynb
-    ↓
-04_phase_trajectory.ipynb
-    ↓
-05_evaluation.ipynb
-```
-
-`01_data_preparation.ipynb`부터 `05_evaluation.ipynb`까지는 공통 bootstrap cell이 현재 실행 환경이 Colab인지 확인하고, repo root를 탐색한 뒤 repo root 기준으로 editable install을 수행합니다. 따라서 Colab에서는 `00_colab_setup.ipynb`를 먼저 실행하는 방식을 권장하고, 로컬 Jupyter에서는 repository 안에서 notebook server를 시작하면 됩니다.
+`01_data_preparation.ipynb`부터 `05_evaluation.ipynb`까지는 Colab clone, Drive mount, `chdir`, package install, runtime check를 수행하지 않고 곧바로 artifact 경로와 실험 로직을 실행합니다.
 
 ## Artifact 경로 규칙
 
 `pcdp.paths`는 artifact root를 다음 우선순위로 정합니다.
 
 1. `PCDP_ARTIFACT_ROOT` 환경변수가 설정되어 있으면 해당 경로
-2. Google Drive가 `/content/drive/MyDrive`에 mount되어 있으면 `/content/drive/MyDrive/phase_conditioned_diffusion_policy`
-3. 그 외에는 `~/phase_conditioned_diffusion_policy_artifacts`
+2. 그 외에는 repository-local `<repo>/artifacts`
 
 artifact root 아래에는 다음 디렉터리가 사용됩니다.
 
 ```text
-<artifact_root>/
+<repo>/artifacts/  (or $PCDP_ARTIFACT_ROOT/)
 ├── data/
 │   ├── demos_ant.npz
 │   └── norm_stats.npz
@@ -210,7 +189,7 @@ artifact root 아래에는 다음 디렉터리가 사용됩니다.
 └── videos/
 ```
 
-로컬에서 artifact 위치를 명시하고 싶다면 다음처럼 실행합니다.
+artifact 위치를 명시하고 싶다면 notebook 실행 전에 다음처럼 설정합니다.
 
 ```bash
 export PCDP_ARTIFACT_ROOT=/absolute/path/to/pcdp_artifacts

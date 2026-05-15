@@ -79,7 +79,7 @@ class DiffusionConfig:
 class TrainingConfig:
     """Optimization parameters consumed by ``train_diffusion_policy``."""
 
-    num_epochs: int = 60
+    num_epochs: int = 70
     lr: float = 1e-4
     weight_decay: float = 1e-6
     warmup_steps: int = 500
@@ -253,7 +253,7 @@ EXPERIMENT_CONFIGS: dict[VariantName, ExperimentConfig] = {
         data=_BASE_DATA,
         model=_BASE_MODEL,
         diffusion=_BASE_DIFFUSION,
-        training=replace(_BASE_TRAINING, num_epochs=100),
+        training=_BASE_TRAINING,
         evaluation=_BASE_EVALUATION,
         artifacts=ArtifactConfig(
             checkpoint_name="vanilla_dp_ckpt.pt",

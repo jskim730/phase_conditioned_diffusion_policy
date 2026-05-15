@@ -79,7 +79,7 @@ class DiffusionConfig:
 class TrainingConfig:
     """Optimization parameters consumed by ``train_diffusion_policy``."""
 
-    num_epochs: int = 70
+    num_epochs: int = 60
     lr: float = 1e-4
     weight_decay: float = 1e-6
     warmup_steps: int = 500

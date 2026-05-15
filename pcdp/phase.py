@@ -63,26 +63,6 @@ def training_frequency_triplet(data: dict) -> tuple[float, float, float]:
     )
 
 
-def periodic_offline_frequencies(data: dict) -> tuple[list[float], list[str]]:
-    """Frequency list used for periodic-conditioning offline sample checks."""
-    f_mean, f_min, f_max = training_frequency_triplet(data)
-    f_std = float(data["freq_window_std"])
-    return (
-        [f_mean, f_min, f_max, f_mean - 3.0 * f_std, f_mean + 3.0 * f_std],
-        ["mean", "min", "max", "OOD-low", "OOD-high"],
-    )
-
-
-def trajectory_offline_frequencies(data: dict) -> tuple[list[float], list[str]]:
-    """Frequency list used for trajectory-conditioning offline sample checks."""
-    freqs, labels = periodic_offline_frequencies(data)
-    f_mean = float(data["freq_window_mean"])
-    f_std = float(data["freq_window_std"])
-    return (
-        [*freqs, f_mean - 6.0 * f_std, f_mean + 6.0 * f_std],
-        [*labels, "far-OOD-low", "far-OOD-high"],
-    )
-
 
 def controllability_sweep_frequency_groups(
     data: dict,

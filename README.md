@@ -181,7 +181,6 @@ artifact root 아래에는 다음 디렉터리가 사용됩니다.
 │   ├── data_phase_advance.png
 │   ├── vanilla_dp_loss.png
 │   ├── phase_periodic_loss.png
-│   ├── phase_periodic_sensitivity.png
 │   ├── phase_trajectory_loss.png
 │   ├── phase_trajectory_sensitivity.png
 │   └── eval_figure1-5_*.png
@@ -330,7 +329,7 @@ noise_scheduler = cfg.build_noise_scheduler()
 ## 개발 메모
 
 - Notebook 안에 핵심 로직을 중복 구현하지 말고 `pcdp/` 패키지에 추가한 뒤 notebook에서는 import해서 사용합니다 (notebook은 thin orchestration layer).
-- 학습 노트북(02–04)은 학습 + loss curve + (phase-conditioned 변형에 한해) phase sensitivity 시각화까지만 담당합니다. 전체 환경 rollout 평가는 모두 `05_evaluation.ipynb`로 일원화되어 있습니다.
+- 학습 노트북(02–04)은 학습 + loss curve 생성을 담당하며, trajectory 모델의 offline phase sensitivity 시각화는 `04_phase_trajectory.ipynb`에서만 수행합니다. 전체 환경 rollout 평가는 모두 `05_evaluation.ipynb`로 일원화되어 있습니다.
 - 새 ablation은 `get_experiment_config(..., training={"num_epochs": 30}, ...)`처럼 section overrides를 넘기면 됩니다. 다만 checkpoint/plot 이름이 같으므로 `artifacts` 섹션도 함께 override해서 파일 충돌을 피해 주세요.
 - Phase를 condition으로 쓰는 모델은 raw phase를 직접 넣지 않고 `pcdp.dataset.encode_phase_cossin`이 적용하는 `(cos φ, sin φ)` 인코딩을 사용합니다.
 - Action은 학습 중 `[-1, 1]`로 normalization되며 rollout 전 raw MuJoCo action range로 unnormalize됩니다.

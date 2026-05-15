@@ -128,6 +128,7 @@ def sample_frequency_variants(
     num_inference_steps: int,
     dt: float = 0.05,
     seed: Optional[int] = None,
+    reference_label: Optional[str] = None,
 ) -> dict[str, tuple[float, np.ndarray]]:
     """Sample one action chunk for each target frequency with a fixed noise seed.
 
@@ -153,11 +154,19 @@ def sample_frequency_variants(
             seed=seed,
         ).numpy()[0]
         samples_by_freq[label] = (float(freq_hz), sample)
-    _print_frequency_rmse(samples_by_freq)
+    _print_frequency_rmse(samples_by_freq, reference_label=reference_label)
     return samples_by_freq
 
 
-def _print_frequency_rmse(samples_by_freq: dict[str, tuple[float, np.ndarray]], reference_label: str = "mean") -> None:
+def _print_frequency_rmse(
+    samples_by_freq: dict[str, tuple[float, np.ndarray]],
+    reference_label: Optional[str] = None,
+) -> None:
+    if reference_label is None:
+        labels = list(samples_by_freq)
+        reference_label = (
+            "mean" if "mean" in samples_by_freq else labels[len(labels) // 2]
+        )
     ref_freq, ref_sample = samples_by_freq[reference_label]
     print(f"=== Output difference from '{reference_label}' baseline ===")
     for label, (freq_hz, sample) in samples_by_freq.items():

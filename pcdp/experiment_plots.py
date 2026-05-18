@@ -159,8 +159,6 @@ def plot_table1_reward_per_step_comparison(
     keys = list(model_keys) if model_keys is not None else list(DEFAULT_MODEL_KEYS)
     labels = [_label_for(k, state) for k in keys]
     colors = [_color_for(k, i) for i, k in enumerate(keys)]
-    edgecolors = ["black" if k == "trajectory_sync" else "none" for k in keys]
-    linewidths = [1.5 if k == "trajectory_sync" else 0.0 for k in keys]
 
     means = []
     spreads = []
@@ -174,8 +172,7 @@ def plot_table1_reward_per_step_comparison(
 
     fig, ax = plt.subplots(1, 1, figsize=(max(7.2, 1.6 * len(keys)), 4.8))
     x = np.arange(len(keys))
-    ax.bar(x, means, yerr=spreads, capsize=5, color=colors, alpha=0.9,
-           edgecolor=edgecolors, linewidth=linewidths)
+    ax.bar(x, means, yerr=spreads, capsize=5, color=colors, alpha=0.9)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=15, ha="right")
     ax.set_ylabel("Reward / step")
@@ -395,8 +392,6 @@ def plot_zone_aggregated_tracking_metrics(
                 mean, spread = _mean_spread(values, interval=interval)
                 means.append(mean)
                 spreads.append(spread)
-            edge = "black" if key == "trajectory_sync" else "none"
-            linewidth = 1.4 if key == "trajectory_sync" else 0.0
             ax.bar(
                 x + offsets[idx],
                 means,
@@ -406,8 +401,6 @@ def plot_zone_aggregated_tracking_metrics(
                 label=_label_for(key, state),
                 color=_color_for(key, idx),
                 alpha=0.9,
-                edgecolor=edge,
-                linewidth=linewidth,
             )
         ax.set_xticks(x)
         ax.set_xticklabels(groups.keys())

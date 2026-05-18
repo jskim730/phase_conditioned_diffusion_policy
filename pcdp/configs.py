@@ -295,6 +295,23 @@ EXPERIMENT_CONFIGS: dict[VariantName, ExperimentConfig] = {
         ),
         tags=("phase", "per-step-cond", "main"),
     ),
+    "phase_trajectory_sync": ExperimentConfig(
+        name="phase_trajectory_sync",
+        display_name="Phase Trajectory + Sync (ours)",
+        model_builder="build_phase_trajectory_dp_model",
+        train_cond_fn="trajectory_phase_cond_fn",
+        sample_cond_fn="trajectory_phase_sample_cond_fn",
+        data=_BASE_DATA,
+        model=_BASE_MODEL,
+        diffusion=_BASE_DIFFUSION,
+        training=_BASE_TRAINING,
+        evaluation=_BASE_EVALUATION,
+        artifacts=ArtifactConfig(
+            checkpoint_name="phase_trajectory_sync_lambda1.2.pt",
+            loss_plot_name="phase_trajectory_sync_loss.png",
+        ),
+        tags=("phase", "per-step-cond", "sync", "ours"),
+    ),
 }
 
 

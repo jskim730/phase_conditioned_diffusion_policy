@@ -242,12 +242,23 @@ def load_checkpoint(path: str | Path, model, ema, device: str = 'cuda',
         tag = "[final EMA]" if best is not None else "[no best — final EMA]"
         print(f"✓ Loaded: {path}  {tag}")
 
-    if ckpt.get('val_log'):
-        if use_best_ema and best is not None:
-            best_idx = min(range(len(ckpt['val_log'])), key=lambda i: ckpt['val_log'][i][1])
-            print(f"  Best val: {ckpt['val_log'][best_idx]}")
+    val_log = ckpt.get('val_log') or []
+    if val_log:
+        # phase-sync fine-tuning stores val_log entries as dicts (total_loss / phase_loss /
+        # diffusion_loss), while standard training stores them as (epoch, val_loss) tuples.
+        if isinstance(val_log[0], dict):
+            key = "total_loss" if "total_loss" in val_log[0] else next(iter(val_log[0]))
+            if use_best_ema and best is not None:
+                best_entry = min(val_log, key=lambda row: row.get(key, float("inf")))
+                print(f"  Best val by {key}: {best_entry}")
+            else:
+                print(f"  Last val: {val_log[-1]}")
         else:
-            print(f"  Last val: {ckpt['val_log'][-1]}")
+            if use_best_ema and best is not None:
+                best_idx = min(range(len(val_log)), key=lambda i: val_log[i][1])
+                print(f"  Best val: {val_log[best_idx]}")
+            else:
+                print(f"  Last val: {val_log[-1]}")
 
     return {
         'train_losses':   ckpt.get('train_losses', []),

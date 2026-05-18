@@ -1,7 +1,7 @@
 """High-level experiment routines used by training notebooks 02--04.
 
 Notebooks orchestrate these helpers; the full env-rollout evaluation protocol
-lives in :mod:`pcdp.evaluation` and is driven by ``05_evaluation.ipynb``.
+lives in :mod:`pcdp.evaluation` and is driven by ``06_evaluation.ipynb``.
 """
 
 from __future__ import annotations

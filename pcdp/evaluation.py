@@ -12,7 +12,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -28,13 +28,19 @@ from .phase import (
 from .sampling import nanmean, nanstd, rollout_multi_seed
 from .training import load_checkpoint
 
-EVAL_CONFIG_NAMES: tuple[str, ...] = ("vanilla", "periodic_phase", "phase_trajectory")
-MODEL_KEYS: tuple[str, ...] = ("vanilla", "periodic", "trajectory")
-PHASE_MODEL_KEYS: tuple[str, ...] = ("periodic", "trajectory")
+EVAL_CONFIG_NAMES: tuple[str, ...] = (
+    "vanilla",
+    "periodic_phase",
+    "phase_trajectory",
+    "phase_trajectory_sync",
+)
+MODEL_KEYS: tuple[str, ...] = ("vanilla", "periodic", "trajectory", "trajectory_sync")
+PHASE_MODEL_KEYS: tuple[str, ...] = ("periodic", "trajectory", "trajectory_sync")
 SUMMARY_MODEL_LABELS: dict[str, str] = {
     "vanilla": "Vanilla DP",
     "periodic": "Periodic Phase",
-    "trajectory": "Trajectory (ours)",
+    "trajectory": "Phase Trajectory",
+    "trajectory_sync": "Phase Trajectory + Sync (ours)",
 }
 
 
@@ -121,7 +127,12 @@ def load_evaluation_state(
         ),
         "trajectory": _spec_from_loaded(
             loaded_models["phase_trajectory"],
-            label="Trajectory (ours)",
+            label="Phase Trajectory",
+            uses_phase=True,
+        ),
+        "trajectory_sync": _spec_from_loaded(
+            loaded_models["phase_trajectory_sync"],
+            label="Phase Trajectory + Sync (ours)",
             uses_phase=True,
         ),
     }
@@ -318,15 +329,21 @@ def run_frequency_sweep_evaluation(
     env,
     data: Mapping[str, object],
     device: str,
-    model_keys: Sequence[str] = PHASE_MODEL_KEYS,
+    model_keys: Optional[Sequence[str]] = None,
     n_seeds: int,
     max_steps: int,
     dt: float = 0.05,
     deterministic_sampling: bool = True,
 ) -> dict[str, dict[float, list[dict]]]:
-    """Run target-frequency controllability sweeps for phase-conditioned models."""
+    """Run target-frequency controllability sweeps for phase-conditioned models.
+
+    ``model_keys`` defaults to the current ``PHASE_MODEL_KEYS`` module-level
+    list, so notebooks can register additional phase-conditioned models (e.g.
+    phase-sync fine-tuned variants) by extending that tuple before calling.
+    """
+    keys = tuple(model_keys) if model_keys is not None else PHASE_MODEL_KEYS
     all_results: dict[str, dict[float, list[dict]]] = {}
-    for model_key in model_keys:
+    for model_key in keys:
         print(f"=== {state.model_specs[model_key].label} frequency sweep ===")
         t0 = time.time()
         model_results: dict[float, list[dict]] = {}
@@ -357,6 +374,7 @@ PHASE_CONDITION_LABELS: dict[str, str] = {
     "vanilla": "none",
     "periodic": "first phase only",
     "trajectory": "full phase trajectory",
+    "trajectory_sync": "full phase trajectory + sync loss",
 }
 
 

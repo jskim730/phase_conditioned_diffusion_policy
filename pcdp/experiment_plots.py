@@ -3,12 +3,72 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .evaluation import metric_array, summary_stats
+from .evaluation import (
+    MODEL_KEYS as DEFAULT_MODEL_KEYS,
+    PHASE_MODEL_KEYS as DEFAULT_PHASE_MODEL_KEYS,
+    SUMMARY_MODEL_LABELS,
+    metric_array,
+    summary_stats,
+)
+
+
+# ---------------------------------------------------------------------
+# Per-model visual styling. ``trajectory`` and ``trajectory_sync``
+# share the red family so the sync model reads as the ours-strengthened
+# version of the trajectory baseline.
+# ---------------------------------------------------------------------
+MODEL_COLORS: dict[str, str] = {
+    "vanilla": "tab:blue",
+    "periodic": "tab:green",
+    "trajectory": "#ff9999",            # light red — sync-less ablation
+    "trajectory_sync": "tab:red",  # strong red — ours (sync fine-tune)
+}
+MODEL_LINEWIDTH: dict[str, float] = {
+    "vanilla": 1.6,
+    "periodic": 1.7,
+    "trajectory": 1.7,
+    "trajectory_sync": 2.6,
+}
+MODEL_MARKERSIZE: dict[str, float] = {
+    "vanilla": 7,
+    "periodic": 7,
+    "trajectory": 7,
+    "trajectory_sync": 9,
+}
+MODEL_FMT: dict[str, str] = {
+    "vanilla": "D-",
+    "periodic": "s-",
+    "trajectory": "^-",
+    "trajectory_sync": "o-",
+}
+_FALLBACK_COLOR_CYCLE = ("tab:purple", "tab:brown", "tab:cyan", "tab:olive")
+
+
+def _color_for(key: str, idx: int = 0) -> str:
+    return MODEL_COLORS.get(key, _FALLBACK_COLOR_CYCLE[idx % len(_FALLBACK_COLOR_CYCLE)])
+
+
+def _linewidth_for(key: str) -> float:
+    return MODEL_LINEWIDTH.get(key, 1.7)
+
+
+def _markersize_for(key: str) -> float:
+    return MODEL_MARKERSIZE.get(key, 7)
+
+
+def _fmt_for(key: str) -> str:
+    return MODEL_FMT.get(key, "o-")
+
+
+def _label_for(key: str, state=None) -> str:
+    if state is not None and key in getattr(state, "model_specs", {}):
+        return state.model_specs[key].label
+    return SUMMARY_MODEL_LABELS.get(key, key)
 
 
 def plot_loss_curve(
@@ -90,17 +150,21 @@ def plot_table1_reward_per_step_comparison(
     table1_results: dict[str, list[dict]],
     output_path: str | Path,
     *,
+    model_keys: Optional[Sequence[str]] = None,
+    state=None,
     interval: str = "ci95",
 ) -> Path:
-    """Save a Table-1 reward-per-step bar chart for all three models."""
+    """Save a Table-1 reward-per-step bar chart for the configured models."""
     output_path = Path(output_path)
-    model_keys = ["vanilla", "periodic", "trajectory"]
-    labels = ["Vanilla DP", "Periodic Phase", "Trajectory (ours)"]
-    colors = ["tab:blue", "tab:green", "tab:red"]
+    keys = list(model_keys) if model_keys is not None else list(DEFAULT_MODEL_KEYS)
+    labels = [_label_for(k, state) for k in keys]
+    colors = [_color_for(k, i) for i, k in enumerate(keys)]
+    edgecolors = ["black" if k == "trajectory_sync" else "none" for k in keys]
+    linewidths = [1.5 if k == "trajectory_sync" else 0.0 for k in keys]
 
     means = []
     spreads = []
-    for key in model_keys:
+    for key in keys:
         values = [
             _metric_value(result, "reward_per_step") for result in table1_results[key]
         ]
@@ -108,11 +172,12 @@ def plot_table1_reward_per_step_comparison(
         means.append(mean)
         spreads.append(spread)
 
-    fig, ax = plt.subplots(1, 1, figsize=(7.2, 4.8))
-    x = np.arange(len(model_keys))
-    ax.bar(x, means, yerr=spreads, capsize=5, color=colors, alpha=0.85)
+    fig, ax = plt.subplots(1, 1, figsize=(max(7.2, 1.6 * len(keys)), 4.8))
+    x = np.arange(len(keys))
+    ax.bar(x, means, yerr=spreads, capsize=5, color=colors, alpha=0.9,
+           edgecolor=edgecolors, linewidth=linewidths)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=12, ha="right")
+    ax.set_xticklabels(labels, rotation=15, ha="right")
     ax.set_ylabel("Reward / step")
     spread_label = "95% CI" if interval == "ci95" else "std"
     ax.set_title(f"Table 1 reward per step comparison ({spread_label})")
@@ -147,6 +212,8 @@ def plot_evaluation_frequency_comparison(
     output_path: str | Path,
     *,
     n_seeds_sweep: int,
+    phase_model_keys: Optional[Sequence[str]] = None,
+    state=None,
 ) -> Path:
     """Save the Figure-2 reward-per-step curve over commanded frequency.
 
@@ -155,42 +222,30 @@ def plot_evaluation_frequency_comparison(
     """
     del table1_results
     output_path = Path(output_path)
-    freqs = sorted(float(f) for f in sweep_results["periodic"].keys())
+    keys = list(phase_model_keys) if phase_model_keys is not None else list(DEFAULT_PHASE_MODEL_KEYS)
+    reference_key = keys[0]
+    freqs = sorted(float(f) for f in sweep_results[reference_key].keys())
 
-    p_rew, p_rew_std = _sweep_metric_summary(
-        sweep_results["periodic"], freqs, "reward_per_step", interval="std"
-    )
-    t_rew, t_rew_std = _sweep_metric_summary(
-        sweep_results["trajectory"], freqs, "reward_per_step", interval="std"
-    )
+    fig, ax = plt.subplots(1, 1, figsize=(7.5, 5.0))
+    for i, key in enumerate(keys):
+        means, stds = _sweep_metric_summary(
+            sweep_results[key], freqs, "reward_per_step", interval="std"
+        )
+        ax.errorbar(
+            freqs,
+            means,
+            yerr=stds,
+            fmt=_fmt_for(key),
+            capsize=4,
+            linewidth=_linewidth_for(key),
+            markersize=_markersize_for(key),
+            color=_color_for(key, i),
+            label=_label_for(key, state),
+        )
 
     f_mean = float(data["freq_window_mean"])
     f_min = float(data["freq_window_min"])
     f_max = float(data["freq_window_max"])
-
-    fig, ax = plt.subplots(1, 1, figsize=(7.5, 5.0))
-    ax.errorbar(
-        freqs,
-        p_rew,
-        yerr=p_rew_std,
-        fmt="s-",
-        capsize=4,
-        linewidth=1.8,
-        markersize=7,
-        color="tab:green",
-        label="Periodic Phase",
-    )
-    ax.errorbar(
-        freqs,
-        t_rew,
-        yerr=t_rew_std,
-        fmt="o-",
-        capsize=4,
-        linewidth=2.2,
-        markersize=8,
-        color="tab:red",
-        label="Trajectory (ours)",
-    )
     ax.axvspan(f_min, f_max, alpha=0.12, color="green", label="In-dist range")
     ax.axvline(f_mean, color="gray", ls="--", alpha=0.4)
     ax.set_xlabel("Sampling-time phase freq (Hz)")
@@ -213,33 +268,39 @@ def plot_frequency_tracking_alignment(
     output_path: str | Path,
     *,
     n_seeds_sweep: int | None = None,
+    phase_model_keys: Optional[Sequence[str]] = None,
+    state=None,
     interval: str = "ci95",
+    periodic_collapse_note: bool = False,
 ) -> Path:
     """Plot commanded frequency against measured gait frequency.
 
-    The dashed diagonal is perfect tracking; points closer to it provide direct
-    evidence that the phase-conditioned sampler follows the requested gait
-    frequency.
+    When ``periodic_collapse_note`` is True, ``sweep_results['periodic']`` is
+    inspected for a separate mode-collapse annotation (rendered as a corner
+    text box reporting the mean measured frequency). This is independent of
+    ``phase_model_keys``: typically the caller filters ``periodic`` out of
+    ``phase_model_keys`` so its line is not drawn, and then enables this flag
+    so the collapse is still acknowledged in the figure.
     """
     output_path = Path(output_path)
-    freqs = sorted(float(f) for f in sweep_results["periodic"].keys())
+    keys = list(phase_model_keys) if phase_model_keys is not None else list(DEFAULT_PHASE_MODEL_KEYS)
+    reference_key = keys[0]
+    freqs = sorted(float(f) for f in sweep_results[reference_key].keys())
     fig, ax = plt.subplots(1, 1, figsize=(6.5, 5.5))
-    styles = {
-        "periodic": dict(fmt="s-", color="tab:green", label="Periodic Phase"),
-        "trajectory": dict(fmt="o-", color="tab:red", label="Trajectory (ours)"),
-    }
-    for model_key, style in styles.items():
+    for i, key in enumerate(keys):
         means, spreads = _sweep_metric_summary(
-            sweep_results[model_key], freqs, "measured_freq_hz", interval=interval
+            sweep_results[key], freqs, "measured_freq_hz", interval=interval
         )
         ax.errorbar(
             freqs,
             means,
             yerr=spreads,
+            fmt=_fmt_for(key),
             capsize=4,
-            linewidth=2.0 if model_key == "trajectory" else 1.7,
-            markersize=8 if model_key == "trajectory" else 7,
-            **style,
+            linewidth=_linewidth_for(key),
+            markersize=_markersize_for(key),
+            color=_color_for(key, i),
+            label=_label_for(key, state),
         )
     lo = min(min(freqs), float(data["freq_window_min"]))
     hi = max(max(freqs), float(data["freq_window_max"]))
@@ -261,7 +322,34 @@ def plot_frequency_tracking_alignment(
     suffix = f", n={n_seeds_sweep}" if n_seeds_sweep is not None else ""
     ax.set_title(f"Frequency command tracking{suffix}")
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="best", fontsize=9)
+    ax.legend(loc="upper left", fontsize=9)
+
+    if periodic_collapse_note and "periodic" in sweep_results:
+        periodic_vals = []
+        for _freq, rollouts in sweep_results["periodic"].items():
+            for r in rollouts:
+                v = r.get("measured_freq_hz", float("nan"))
+                if np.isfinite(v):
+                    periodic_vals.append(float(v))
+        if periodic_vals:
+            mean_freq = float(np.mean(periodic_vals))
+            ax.text(
+                0.98,
+                0.02,
+                f"Periodic Phase: mode collapse\n(measured ≈ {mean_freq:.2f} Hz across all commands,\n outside plot range)",
+                transform=ax.transAxes,
+                ha="right",
+                va="bottom",
+                fontsize=8,
+                style="italic",
+                bbox=dict(
+                    boxstyle="round,pad=0.35",
+                    facecolor="#f5f5f5",
+                    edgecolor="gray",
+                    alpha=0.85,
+                ),
+            )
+
     plt.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=140, bbox_inches="tight")
@@ -275,23 +363,26 @@ def plot_zone_aggregated_tracking_metrics(
     sweep_results: dict[str, dict[float, list[dict]]],
     output_path: str | Path,
     *,
+    phase_model_keys: Optional[Sequence[str]] = None,
+    state=None,
     interval: str = "ci95",
 ) -> Path:
     """Save OOD/in-distribution aggregate tracking metrics by frequency zone."""
     output_path = Path(output_path)
     groups = _zone_frequency_groups(freq_protocol)
-    models = ["periodic", "trajectory"]
-    labels = {"periodic": "Periodic Phase", "trajectory": "Trajectory (ours)"}
-    colors = {"periodic": "tab:green", "trajectory": "tab:red"}
+    keys = list(phase_model_keys) if phase_model_keys is not None else list(DEFAULT_PHASE_MODEL_KEYS)
     metrics = [
         ("abs_freq_error_hz", "|Frequency error| (Hz) ↓"),
         ("phase_locking_value", "Phase locking value ↑"),
     ]
+    n_models = len(keys)
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.8))
     x = np.arange(len(groups))
-    width = 0.34
+    total_width = 0.8
+    width = total_width / max(n_models, 1)
+    offsets = (np.arange(n_models) - (n_models - 1) / 2.0) * width
     for ax, (metric, ylabel) in zip(axes, metrics):
-        for idx, model_key in enumerate(models):
+        for idx, key in enumerate(keys):
             means = []
             spreads = []
             for freqs in groups.values():
@@ -299,21 +390,24 @@ def plot_zone_aggregated_tracking_metrics(
                 for freq in freqs:
                     values.extend(
                         _metric_value(result, metric)
-                        for result in sweep_results[model_key][float(freq)]
+                        for result in sweep_results[key][float(freq)]
                     )
                 mean, spread = _mean_spread(values, interval=interval)
                 means.append(mean)
                 spreads.append(spread)
-            offset = (idx - 0.5) * width
+            edge = "black" if key == "trajectory_sync" else "none"
+            linewidth = 1.4 if key == "trajectory_sync" else 0.0
             ax.bar(
-                x + offset,
+                x + offsets[idx],
                 means,
                 width=width,
                 yerr=spreads,
                 capsize=4,
-                label=labels[model_key],
-                color=colors[model_key],
-                alpha=0.85,
+                label=_label_for(key, state),
+                color=_color_for(key, idx),
+                alpha=0.9,
+                edgecolor=edge,
+                linewidth=linewidth,
             )
         ax.set_xticks(x)
         ax.set_xticklabels(groups.keys())
@@ -337,30 +431,23 @@ def plot_phase_tracking_timeseries(
     *,
     seed_idx: int = 0,
     dt: float = 0.05,
+    phase_model_keys: Optional[Sequence[str]] = None,
+    state=None,
 ) -> Path:
-    """Plot command vs measured phase over time for a representative rollout.
-
-    Picks the in-distribution median target frequency from ``freq_protocol``
-    and shows how Periodic and Trajectory rollouts track the command phase.
-    Each panel overlays unwrapped command (dashed) and measured (solid)
-    phase trajectories for one model, with the rollout PLV reported in the
-    title.
-    """
+    """Plot command vs measured phase over time for one rollout per model."""
     output_path = Path(output_path)
+    keys = list(phase_model_keys) if phase_model_keys is not None else list(DEFAULT_PHASE_MODEL_KEYS)
 
-    # Pick the in-distribution median freq (q50).  ``in_freqs`` has three
-    # interior commands and the middle one is the training mean's neighbour.
     in_freqs = list(freq_protocol.in_freqs)
     target_freq = float(in_freqs[len(in_freqs) // 2])
 
-    models = [
-        ("periodic", "Periodic Phase", "tab:green"),
-        ("trajectory", "Trajectory (ours)", "tab:red"),
-    ]
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 3.8), sharex=True)
-    for col, (mkey, label, color) in enumerate(models):
-        rollout = sweep_results[mkey][target_freq][seed_idx]
+    n_panels = len(keys)
+    fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 3.8), sharex=True, squeeze=False)
+    axes = axes[0]
+    for col, key in enumerate(keys):
+        label = _label_for(key, state)
+        color = _color_for(key, col)
+        rollout = sweep_results[key][target_freq][seed_idx]
         measured = np.asarray(rollout.get("measured_phase", []), dtype=np.float64)
         command = np.asarray(rollout.get("command_phase", []), dtype=np.float64)
         plv = float(rollout.get("phase_locking_value", float("nan")))
@@ -374,13 +461,11 @@ def plot_phase_tracking_timeseries(
         t = np.arange(n) * float(dt)
         measured_u = np.unwrap(measured[:n])
         command_u = np.unwrap(command[:n])
-        # Align starting offset so both curves begin at the same value; PLV
-        # is invariant to a constant offset, so this is purely cosmetic.
         offset = measured_u[0] - command_u[0]
         command_aligned = command_u + offset
 
         ax.plot(t, command_aligned, "--", color="black", alpha=0.6, label="command (target)")
-        ax.plot(t, measured_u, "-", color=color, linewidth=1.8, label=f"measured ({label})")
+        ax.plot(t, measured_u, "-", color=color, linewidth=_linewidth_for(key), label=f"measured ({label})")
         ax.set_ylabel("Unwrapped phase (rad)")
         ax.set_title(f"{label}  |  f_cmd={target_freq:.3f} Hz, PLV={plv:.3f}")
         ax.set_xlabel("Time (s)")
@@ -415,19 +500,19 @@ def plot_paper_figures(
     figures_dir: str | Path,
     *,
     n_seeds_sweep: int,
+    model_keys: Optional[Sequence[str]] = None,
+    phase_model_keys: Optional[Sequence[str]] = None,
+    state=None,
     interval: str = "ci95",
 ) -> dict[str, Path]:
-    """Emit the four paper-quality evaluation figures with standardized names.
-
-    Wraps the individual ``plot_*`` calls used by ``05_evaluation.ipynb`` so
-    the notebook stays a single-line orchestration step.  Returns the saved
-    paths keyed by ``PAPER_FIGURE_NAMES``.
-    """
+    """Emit the five paper-quality evaluation figures for the configured models."""
     figures_dir = Path(figures_dir)
     paths = {}
     paths["reward_per_step_comparison"] = plot_table1_reward_per_step_comparison(
         table1_results,
         figures_dir / PAPER_FIGURE_NAMES["reward_per_step_comparison"],
+        model_keys=model_keys,
+        state=state,
         interval=interval,
     )
     paths["reward_per_step_vs_freq"] = plot_evaluation_frequency_comparison(
@@ -436,23 +521,37 @@ def plot_paper_figures(
         data,
         figures_dir / PAPER_FIGURE_NAMES["reward_per_step_vs_freq"],
         n_seeds_sweep=n_seeds_sweep,
+        phase_model_keys=phase_model_keys,
+        state=state,
     )
+    # Figure 3 only: exclude 'periodic' from the lines because its measured_freq
+    # mode-collapses near ~1.2 Hz and falls outside the commanded-frequency ylim.
+    # Other figures keep periodic for full comparison.
+    base_phase_keys = phase_model_keys if phase_model_keys is not None else DEFAULT_PHASE_MODEL_KEYS
+    phase_keys_for_freq_alignment = tuple(k for k in base_phase_keys if k != "periodic")
     paths["target_vs_measured_freq"] = plot_frequency_tracking_alignment(
         sweep_results,
         data,
         figures_dir / PAPER_FIGURE_NAMES["target_vs_measured_freq"],
         n_seeds_sweep=n_seeds_sweep,
+        phase_model_keys=phase_keys_for_freq_alignment,
+        state=state,
+        periodic_collapse_note=True,
     )
     paths["zone_tracking_metrics"] = plot_zone_aggregated_tracking_metrics(
         freq_protocol,
         sweep_results,
         figures_dir / PAPER_FIGURE_NAMES["zone_tracking_metrics"],
+        phase_model_keys=phase_model_keys,
+        state=state,
         interval=interval,
     )
     paths["phase_tracking_timeseries"] = plot_phase_tracking_timeseries(
         sweep_results,
         freq_protocol,
         figures_dir / PAPER_FIGURE_NAMES["phase_tracking_timeseries"],
+        phase_model_keys=phase_model_keys,
+        state=state,
     )
     return paths
 

@@ -9,7 +9,7 @@ Ant locomotion demonstration에 post-hoc 보행 phase label을 붙이고, Diffus
 1. **Vanilla Diffusion Policy** — observation window만 global condition으로 사용.
 2. **Periodic Phase Conditioning** — action chunk의 첫 phase `φ₀`를 `(cos φ₀, sin φ₀)`로 인코딩해 global condition에 붙임.
 3. **Phase Trajectory Conditioning** — action chunk 전체 phase trajectory `φ₀:H`를 step별 `(cos φₜ, sin φₜ)`로 인코딩하고 U-Net residual block에 **per-step FiLM** 방식으로 주입.
-4. **Phase Trajectory + Sync Loss (ours)** — Phase Trajectory 모델에 **frozen phase estimator**로부터의 phase synchronization loss(`L_total = L_diffusion + 1.2 · L_phase`)를 더해 10 epoch fine-tune. 평가 노트북에서는 `trajectory_sync` key.
+4. **Phase Trajectory + Sync Loss (ours)** — Phase Trajectory 모델에 **frozen phase estimator**로부터의 phase synchronization loss(`L_total = L_diffusion + 0.12 · L_phase`)를 더해 10 epoch fine-tune. 평가 노트북에서는 `trajectory_sync` key.
 
 현재 main contribution은 **Phase Trajectory + Sync Loss (ours)** 입니다. Phase Trajectory 모델은 sync loss의 효과를 보여주는 ablation 역할을 합니다.
 
@@ -45,7 +45,7 @@ Ant locomotion demonstration에 post-hoc 보행 phase label을 붙이고, Diffus
 1. **Quality preservation/improvement** — Phase trajectory conditioning은 vanilla baseline 대비 정성적·정량적으로 더 우수한 실보행 정책(forward velocity ~7×, reward/step 2×)을 학습합니다.
 2. **Frequency controllability** — Trajectory conditioning은 in-distribution에서 `|freq err| < 0.06 Hz`, PLV > 0.88의 명령-주파수 추종을 달성하며, periodic(single-step phase) conditioning의 mode collapse를 회피합니다.
 3. **Graceful generalization** — 학습 범위보다 느린 frequency(OOD-low)에서 zero-shot으로 동일한 tracking 성능을 보이며, 빠른 영역(OOD-high)에서는 graceful degradation을 보입니다.
-4. **Phase synchronization via frozen estimator (ours)** — Phase trajectory 모델을 frozen MLP estimator로부터의 sync loss(λ=1.2)로 fine-tune하면 in-distribution gait quality와 frequency tracking이 동시에 추가 향상됩니다 (정량 비교는 Table 1/2의 sync 행 참고).
+4. **Phase synchronization via frozen estimator (ours)** — Phase trajectory 모델을 frozen MLP estimator로부터의 sync loss(λ=0.12)로 fine-tune하면 in-distribution gait quality와 frequency tracking이 동시에 추가 향상됩니다 (정량 비교는 Table 1/2의 sync 행 참고).
 
 ## Repository 구성
 
@@ -91,7 +91,7 @@ phase_conditioned_diffusion_policy/
     ↓
 04_phase_trajectory.ipynb
     ↓
-05_frozen_phase_estimator.ipynb   ← phase estimator 학습 + sync 파인튜닝 (LAMBDA_PHASE=1.2)
+05_frozen_phase_estimator.ipynb   ← phase estimator 학습 + sync 파인튜닝 (LAMBDA_PHASE=0.12)
     ↓
 06_evaluation.ipynb               ← 4개 모델 통합 평가
 ```
@@ -102,7 +102,7 @@ phase_conditioned_diffusion_policy/
 | 02 | `notebooks/02_vanilla_dp.ipynb` | phase condition 없는 Vanilla DP를 60 epoch 학습. | **~30–45분** | `checkpoints/vanilla_dp_ckpt.pt`, `figures/vanilla_dp_loss.png` |
 | 03 | `notebooks/03_phase_periodic.ipynb` | 첫 phase만 global condition으로 주는 Periodic Phase 모델을 60 epoch 학습. | **~30–45분** | `checkpoints/phase_periodic_ckpt.pt`, `figures/phase_periodic_loss.png` |
 | 04 | `notebooks/04_phase_trajectory.ipynb` | per-step phase trajectory를 U-Net에 FiLM 주입하는 Phase Trajectory 모델을 60 epoch 학습 + sensitivity 시각화. | **~40–60분** | `checkpoints/phase_trajectory_ckpt.pt`, `figures/phase_trajectory_loss.png`, `figures/phase_trajectory_sensitivity.png` |
-| 05 | `notebooks/05_frozen_phase_estimator.ipynb` | Phase estimator MLP(30 epoch) 학습 + Phase Trajectory 모델을 `L_total = L_diffusion + 1.2 · L_phase`로 10 epoch fine-tune해 **ours** 체크포인트 생성. | **~20–35분** | `checkpoints/frozen_phase_estimator_mlp.pt`, `checkpoints/phase_trajectory_sync_lambda1.2.pt`, `figures/frozen_phase_estimator_training.png` |
+| 05 | `notebooks/05_frozen_phase_estimator.ipynb` | Phase estimator MLP(30 epoch) 학습 + Phase Trajectory 모델을 `L_total = L_diffusion + 0.12 · L_phase`로 10 epoch fine-tune해 **ours** 체크포인트 생성. | **~20–35분** | `checkpoints/frozen_phase_estimator_mlp.pt`, `checkpoints/phase_trajectory_sync_lambda0.12.pt`, `figures/frozen_phase_estimator_training.png` |
 | 06 | `notebooks/06_evaluation.ipynb` | 4개 모델(`vanilla` / `periodic` / `trajectory` / `trajectory_sync` = ours)을 동일 rollout protocol로 비교하고 frequency controllability 결과 + paper figures 저장. | **~2–4시간** | `results/table{1,2}_*.md`, `results/eval_results.npz`, `figures/eval_figure{1..5}_*.png` |
 
 전체 파이프라인 한 번 완주: **약 4.5–7시간** (Colab T4 GPU 기준). A100/H100에서는 절반 이하.
@@ -182,7 +182,7 @@ artifact root 아래에는 다음 디렉터리가 사용됩니다.
 │   ├── phase_periodic_ckpt.pt
 │   ├── phase_trajectory_ckpt.pt
 │   ├── frozen_phase_estimator_mlp.pt
-│   └── phase_trajectory_sync_lambda1.2.pt
+│   └── phase_trajectory_sync_lambda0.12.pt
 ├── results/
 │   ├── table1_indist_quality.md
 │   ├── table2_frequency_tracking.md
@@ -244,7 +244,7 @@ phase[t : t + pred_horizon]        -> phase chunk
 | `vanilla` | `02_vanilla_dp.ipynb` | `build_vanilla_dp_model` | `vanilla_cond_fn` | `vanilla_sample_cond_fn` | `vanilla_dp_ckpt.pt` |
 | `periodic_phase` | `03_phase_periodic.ipynb` | `build_periodic_phase_dp_model` | `periodic_phase_cond_fn` | `periodic_phase_sample_cond_fn` | `phase_periodic_ckpt.pt` |
 | `phase_trajectory` | `04_phase_trajectory.ipynb` | `build_phase_trajectory_dp_model` | `trajectory_phase_cond_fn` | `trajectory_phase_sample_cond_fn` | `phase_trajectory_ckpt.pt` |
-| `phase_trajectory_sync` *(ours)* | `05_frozen_phase_estimator.ipynb` | `build_phase_trajectory_dp_model` (동일 architecture, sync loss로 fine-tune) | `trajectory_phase_cond_fn` | `trajectory_phase_sample_cond_fn` | `phase_trajectory_sync_lambda1.2.pt` |
+| `phase_trajectory_sync` *(ours)* | `05_frozen_phase_estimator.ipynb` | `build_phase_trajectory_dp_model` (동일 architecture, sync loss로 fine-tune) | `trajectory_phase_cond_fn` | `trajectory_phase_sample_cond_fn` | `phase_trajectory_sync_lambda0.12.pt` |
 
 기본 scheduler/training 설정 (`pcdp.configs`):
 
@@ -254,7 +254,7 @@ phase[t : t + pred_horizon]        -> phase chunk
 - prediction type: `epsilon`
 - default batch size: `256`
 - default training epochs: **60** (모든 variants 공통, `_BASE_TRAINING.num_epochs`)
-- sync fine-tuning (`train_phase_sync_diffusion_policy`): 10 epochs, lr=5e-5, lambda=1.2, phase warmup 1 epoch
+- sync fine-tuning (`train_phase_sync_diffusion_policy`): 10 epochs, lr=5e-5, lambda=0.12, phase warmup 1 epoch
 - `cfg.evaluation` rollout default: `max_steps=300`, `n_seeds=5` (quick sanity check)
 - **paper-quality evaluation** (`06_evaluation.ipynb`)은 위 default를 override: `max_steps=1000`, `n_seeds=20` (Table 1) / `n_seeds=10` (Table 2)
 - **Phase joint** (`ANT_PHASE_JOINT_IDX = 19`): Ant-v5 MuJoCo 모델의 hip joint position 인덱스. 환경 상수이므로 `pcdp.data_extraction`에서 한 곳에서만 정의.
@@ -349,7 +349,7 @@ noise_scheduler = cfg.build_noise_scheduler()
 - 새 ablation은 `get_experiment_config(..., training={"num_epochs": 30}, ...)`처럼 section overrides를 넘기면 됩니다. 다만 checkpoint/plot 이름이 같으므로 `artifacts` 섹션도 함께 override해서 파일 충돌을 피해 주세요.
 - Phase를 condition으로 쓰는 모델은 raw phase를 직접 넣지 않고 `pcdp.dataset.encode_phase_cossin`이 적용하는 `(cos φ, sin φ)` 인코딩을 사용합니다.
 - Action은 학습 중 `[-1, 1]`로 normalization되며 rollout 전 raw MuJoCo action range로 unnormalize됩니다.
-- Sync fine-tuning을 다른 lambda로 시도하려면 `05_frozen_phase_estimator.ipynb`의 `LAMBDA_PHASE` 값을 변경 후 실행하세요. 체크포인트 이름이 lambda 값에 따라 달라지므로(`phase_trajectory_sync_lambda{λ:g}.pt`) 기존 ours 체크포인트와 충돌하지 않습니다. 단 평가 노트북은 `lambda1.2`를 기본으로 로드하므로 다른 lambda를 평가하려면 `pcdp.configs.EXPERIMENT_CONFIGS["phase_trajectory_sync"].artifacts.checkpoint_name`을 일시적으로 override 필요.
+- Sync fine-tuning을 다른 lambda로 시도하려면 `05_frozen_phase_estimator.ipynb`의 `LAMBDA_PHASE` 값을 변경 후 실행하세요. 체크포인트 이름이 lambda 값에 따라 달라지므로(`phase_trajectory_sync_lambda{λ:g}.pt`) 기존 ours 체크포인트와 충돌하지 않습니다. 단 평가 노트북은 `lambda0.12`를 기본으로 로드하므로 다른 lambda를 평가하려면 `pcdp.configs.EXPERIMENT_CONFIGS["phase_trajectory_sync"].artifacts.checkpoint_name`을 일시적으로 override 필요.
 
 ### Figure 명명 규칙
 

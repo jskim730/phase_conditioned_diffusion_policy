@@ -307,7 +307,7 @@ EXPERIMENT_CONFIGS: dict[VariantName, ExperimentConfig] = {
         training=_BASE_TRAINING,
         evaluation=_BASE_EVALUATION,
         artifacts=ArtifactConfig(
-            checkpoint_name="phase_trajectory_sync_lambda1.2.pt",
+            checkpoint_name="phase_trajectory_sync_lambda0.12.pt",
             loss_plot_name="phase_trajectory_sync_loss.png",
         ),
         tags=("phase", "per-step-cond", "sync", "ours"),

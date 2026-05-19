@@ -1,7 +1,5 @@
 # Phase-Conditioned Diffusion Policy
 
-Ant locomotion demonstration에 post-hoc 보행 phase label을 붙이고, Diffusion Policy가 **원하는 phase/frequency trajectory**를 따라 action chunk를 생성할 수 있는지 검증하는 연구용 코드베이스입니다. 프로젝트는 사용자가 Colab/로컬에서 이미 repository root를 작업 디렉터리로 지정했다고 가정하며, notebook은 실험 흐름을 실행하는 얇은 orchestration layer 역할을 합니다.
-
 ## 핵심 아이디어
 
 기본 Diffusion Policy는 최근 observation window만 조건으로 받아 다음 action chunk를 denoising합니다. 이 프로젝트는 여기에 보행 주기 정보를 단계적으로 추가하는 **4가지 모델**을 비교합니다.
@@ -9,11 +7,11 @@ Ant locomotion demonstration에 post-hoc 보행 phase label을 붙이고, Diffus
 1. **Vanilla Diffusion Policy** — observation window만 global condition으로 사용.
 2. **Periodic Phase Conditioning** — action chunk의 첫 phase `φ₀`를 `(cos φ₀, sin φ₀)`로 인코딩해 global condition에 붙임.
 3. **Phase Trajectory Conditioning** — action chunk 전체 phase trajectory `φ₀:H`를 step별 `(cos φₜ, sin φₜ)`로 인코딩하고 U-Net residual block에 **per-step FiLM** 방식으로 주입.
-4. **Phase Trajectory + Sync Loss (ours)** — Phase Trajectory 모델에 **frozen phase estimator**로부터의 phase synchronization loss(`L_total = L_diffusion + 0.12 · L_phase`)를 더해 10 epoch fine-tune. 평가 노트북에서는 `trajectory_sync` key.
+4. **Phase Trajectory + Sync Loss (ours)** — Phase Trajectory 모델에 **frozen phase estimator**로부터의 phase synchronization loss(`L_total = L_diffusion + 0.12 · L_phase`)를 더해 15 epoch fine-tune. 평가 노트북에서는 `trajectory_sync` key.
 
 현재 main contribution은 **Phase Trajectory + Sync Loss (ours)** 입니다. Phase Trajectory 모델은 sync loss의 효과를 보여주는 ablation 역할을 합니다.
 
-## 핵심 결과 (TL;DR)
+## 핵심 결과
 
 학습 데이터의 평균 frequency `f̄ ≈ 2.023 Hz`, n=20 (Table 1) / n=10 (Table 2), 95% CI.
 

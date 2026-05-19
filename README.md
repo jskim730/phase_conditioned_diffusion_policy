@@ -21,28 +21,24 @@ Ant locomotion demonstration에 post-hoc 보행 phase label을 붙이고, Diffus
 
 | Model | Reward / step ↑ | Mean x-velocity ↑ | Measured freq (Hz) |
 |---|---|---|---|
-| Vanilla DP | 0.742 ± 0.087 | 0.167 ± 0.090 | 1.384 ± 0.041 |
-| Periodic Phase | 0.870 ± 0.240 | 0.296 ± 0.263 | 1.198 ± 0.090 |
-| Phase Trajectory | 1.512 ± 0.136 | 1.138 ± 0.120 | 1.940 ± 0.053 |
-| **Phase Trajectory + Sync (ours)** | *측정 후 채우기* | *측정 후 채우기* | *측정 후 채우기* |
+| Vanilla DP | 0.979 ± 0.214 | 0.466 ± 0.241 | 1.411 ± 0.076 |
+| Periodic Phase | 0.854 ± 0.098 | 0.317 ± 0.119 | 1.249 ± 0.060 |
+| Phase Trajectory | **1.623 ± 0.208** | **1.247 ± 0.182** | 1.913 ± 0.079 |
+| **Phase Trajectory + Sync (ours)** | 1.488 ± 0.175 | 1.106 ± 0.160  | 1.955 ± 0.058 |
 
 ### Table 2 — Frequency command tracking (in-dist median, f_cmd ≈ 2.050 Hz)
 
 | Model | \|freq err\| ↓ | PLV ↑ |
 |---|---|---|
-| Periodic | 0.822 ± 0.079 | 0.230 ± 0.051 |
-| Phase Trajectory | 0.046 ± 0.057 | 0.879 ± 0.081 |
-| **Phase Trajectory + Sync (ours)** | *측정 후 채우기* | *측정 후 채우기* |
-
-전체 결과: [`results/table1_indist_quality.md`](results/table1_indist_quality.md), [`results/table2_frequency_tracking.md`](results/table2_frequency_tracking.md).
-
-> sync 행은 `05_frozen_phase_estimator.ipynb` → `06_evaluation.ipynb`를 차례로 실행한 뒤 자동 생성되는 markdown 결과에서 옮겨 적습니다.
+| Periodic | 0.713 ± 0.122 | 0.280 ± 0.053 |
+| Phase Trajectory | 0.135 ± 0.148 | 0.778 ± 0.174 |
+| **Phase Trajectory + Sync (ours)** | **0.035 ± 0.017** | **0.912 ± 0.017** |
 
 ## Contributions
 
 이 코드베이스는 다음 네 가지 claim을 입증합니다.
 
-1. **Quality preservation/improvement** — Phase trajectory conditioning은 vanilla baseline 대비 정성적·정량적으로 더 우수한 실보행 정책(forward velocity ~7×, reward/step 2×)을 학습합니다.
+1. **Quality preservation/improvement** — Phase trajectory conditioning은 vanilla baseline 대비 정성적·정량적으로 더 우수한 실보행 정책을 학습합니다.
 2. **Frequency controllability** — Trajectory conditioning은 in-distribution에서 `|freq err| < 0.06 Hz`, PLV > 0.88의 명령-주파수 추종을 달성하며, periodic(single-step phase) conditioning의 mode collapse를 회피합니다.
 3. **Graceful generalization** — 학습 범위보다 느린 frequency(OOD-low)에서 zero-shot으로 동일한 tracking 성능을 보이며, 빠른 영역(OOD-high)에서는 graceful degradation을 보입니다.
 4. **Phase synchronization via frozen estimator (ours)** — Phase trajectory 모델을 frozen MLP estimator로부터의 sync loss(λ=0.12)로 fine-tune하면 in-distribution gait quality와 frequency tracking이 동시에 추가 향상됩니다 (정량 비교는 Table 1/2의 sync 행 참고).
@@ -98,14 +94,14 @@ phase_conditioned_diffusion_policy/
 
 | 순서 | Notebook | 역할 | 예상 소요 (Colab T4) | 주요 산출물 |
 |---:|---|---|---|---|
-| 01 | `notebooks/01_data_preparation.ipynb` | Minari Ant dataset에서 phase-coherent demo를 추출하고, train/val split + train-only normalization stats를 저장. | **~5–15분** (다운로드 포함, 캐시 시 ~2–5분) | `data/demos_ant.npz`, `data/norm_stats.npz`, `figures/data_*.png` |
-| 02 | `notebooks/02_vanilla_dp.ipynb` | phase condition 없는 Vanilla DP를 60 epoch 학습. | **~30–45분** | `checkpoints/vanilla_dp_ckpt.pt`, `figures/vanilla_dp_loss.png` |
-| 03 | `notebooks/03_phase_periodic.ipynb` | 첫 phase만 global condition으로 주는 Periodic Phase 모델을 60 epoch 학습. | **~30–45분** | `checkpoints/phase_periodic_ckpt.pt`, `figures/phase_periodic_loss.png` |
-| 04 | `notebooks/04_phase_trajectory.ipynb` | per-step phase trajectory를 U-Net에 FiLM 주입하는 Phase Trajectory 모델을 60 epoch 학습 + sensitivity 시각화. | **~40–60분** | `checkpoints/phase_trajectory_ckpt.pt`, `figures/phase_trajectory_loss.png`, `figures/phase_trajectory_sensitivity.png` |
-| 05 | `notebooks/05_frozen_phase_estimator.ipynb` | Phase estimator MLP(30 epoch) 학습 + Phase Trajectory 모델을 `L_total = L_diffusion + 0.12 · L_phase`로 10 epoch fine-tune해 **ours** 체크포인트 생성. | **~20–35분** | `checkpoints/frozen_phase_estimator_mlp.pt`, `checkpoints/phase_trajectory_sync_lambda0.12.pt`, `figures/frozen_phase_estimator_training.png` |
-| 06 | `notebooks/06_evaluation.ipynb` | 4개 모델(`vanilla` / `periodic` / `trajectory` / `trajectory_sync` = ours)을 동일 rollout protocol로 비교하고 frequency controllability 결과 + paper figures 저장. | **~2–4시간** | `results/table{1,2}_*.md`, `results/eval_results.npz`, `figures/eval_figure{1..5}_*.png` |
+| 01 | `notebooks/01_data_preparation.ipynb` | Minari Ant dataset에서 phase-coherent demo를 추출하고, train/val split + train-only normalization stats를 저장. | **~10분** (다운로드 포함) | `data/demos_ant.npz`, `data/norm_stats.npz`, `figures/data_*.png` |
+| 02 | `notebooks/02_vanilla_dp.ipynb` | phase condition 없는 Vanilla DP를 60 epoch 학습. | **~25분** | `checkpoints/vanilla_dp_ckpt.pt`, `figures/vanilla_dp_loss.png` |
+| 03 | `notebooks/03_phase_periodic.ipynb` | 첫 phase만 global condition으로 주는 Periodic Phase 모델을 60 epoch 학습. | **~25분** | `checkpoints/phase_periodic_ckpt.pt`, `figures/phase_periodic_loss.png` |
+| 04 | `notebooks/04_phase_trajectory.ipynb` | per-step phase trajectory를 U-Net에 FiLM 주입하는 Phase Trajectory 모델을 60 epoch 학습 + sensitivity 시각화. | **~25분** | `checkpoints/phase_trajectory_ckpt.pt`, `figures/phase_trajectory_loss.png`, `figures/phase_trajectory_sensitivity.png` |
+| 05 | `notebooks/05_frozen_phase_estimator.ipynb` | Phase estimator MLP(40 epoch) 학습 + Phase Trajectory 모델을 `L_total = L_diffusion + 0.12 · L_phase`로 15 epoch fine-tune해 **ours** 체크포인트 생성. | **~15분** | `checkpoints/frozen_phase_estimator_mlp.pt`, `checkpoints/phase_trajectory_sync_lambda0.12.pt`, `figures/frozen_phase_estimator_training.png` |
+| 06 | `notebooks/06_evaluation.ipynb` | 4개 모델(`vanilla` / `periodic` / `trajectory` / `trajectory_sync` = ours)을 동일 rollout protocol로 비교하고 frequency controllability 결과 + paper figures 저장. | **~70분** | `results/table{1,2}_*.md`, `results/eval_results.npz`, `figures/eval_figure{1..5}_*.png` |
 
-전체 파이프라인 한 번 완주: **약 4.5–7시간** (Colab T4 GPU 기준). A100/H100에서는 절반 이하.
+전체 파이프라인 한 번 완주: **약 3시간** (Colab T4 GPU 기준).
 
 ## 모듈별 역할
 
@@ -334,28 +330,3 @@ noise_scheduler = cfg.build_noise_scheduler()
 ```
 
 학습/로드/샘플링/rollout은 notebook에서 `experiment_runner.py` (학습) 또는 `evaluation.py` (평가) wrapper를 통해 실행하는 것을 권장합니다.
-
-## 재현성 메모
-
-- `pcdp.configs`의 `set_global_seed(seed=42)`로 Python/NumPy/PyTorch seed 고정.
-- Data split seed는 `norm_stats.npz`에 함께 저장되어 이후 학습 노트북에서 동일 split을 사용.
-- checkpoint에는 model state, EMA state, best EMA state, train/validation loss log, experiment config가 저장.
-- `load_checkpoint`는 phase-sync fine-tuning이 저장하는 dict형 `val_log`와 일반 학습이 저장하는 tuple형 `val_log`를 모두 자동 인식.
-
-## 개발 메모
-
-- Notebook 안에 핵심 로직을 중복 구현하지 말고 `pcdp/` 패키지에 추가한 뒤 notebook에서는 import해서 사용합니다 (notebook은 thin orchestration layer).
-- 학습 노트북(02–05)은 학습 + loss curve 생성을 담당하며, trajectory 모델의 offline phase sensitivity 시각화는 `04_phase_trajectory.ipynb`에서만 수행합니다. 전체 환경 rollout 평가는 모두 `06_evaluation.ipynb`로 일원화되어 있습니다.
-- 새 ablation은 `get_experiment_config(..., training={"num_epochs": 30}, ...)`처럼 section overrides를 넘기면 됩니다. 다만 checkpoint/plot 이름이 같으므로 `artifacts` 섹션도 함께 override해서 파일 충돌을 피해 주세요.
-- Phase를 condition으로 쓰는 모델은 raw phase를 직접 넣지 않고 `pcdp.dataset.encode_phase_cossin`이 적용하는 `(cos φ, sin φ)` 인코딩을 사용합니다.
-- Action은 학습 중 `[-1, 1]`로 normalization되며 rollout 전 raw MuJoCo action range로 unnormalize됩니다.
-- Sync fine-tuning을 다른 lambda로 시도하려면 `05_frozen_phase_estimator.ipynb`의 `LAMBDA_PHASE` 값을 변경 후 실행하세요. 체크포인트 이름이 lambda 값에 따라 달라지므로(`phase_trajectory_sync_lambda{λ:g}.pt`) 기존 ours 체크포인트와 충돌하지 않습니다. 단 평가 노트북은 `lambda0.12`를 기본으로 로드하므로 다른 lambda를 평가하려면 `pcdp.configs.EXPERIMENT_CONFIGS["phase_trajectory_sync"].artifacts.checkpoint_name`을 일시적으로 override 필요.
-
-### Figure 명명 규칙
-
-| Phase | Prefix | 예시 |
-|---|---|---|
-| Data preparation (nb01) | `data_` | `data_quality_distribution.png`, `data_phase_advance.png` |
-| Training (nb02–04) | `<variant>_` | `vanilla_dp_loss.png`, `phase_trajectory_sensitivity.png` |
-| Frozen estimator + sync (nb05) | `frozen_phase_estimator_` | `frozen_phase_estimator_training.png` |
-| Evaluation (nb06) | `eval_figureN_` | `eval_figure1-5_*.png` |

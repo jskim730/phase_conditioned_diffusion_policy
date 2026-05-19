@@ -2,10 +2,12 @@
 
 ## 핵심 아이디어
 
-Quadruped locomotion은 본질적으로 주기적인 phase 구조를 가지며, gait phase는 보행 제어에 중요한 inductive bias로 작용합니다.\n
+Quadruped locomotion은 본질적으로 주기적인 phase 구조를 가지며, gait phase는 보행 제어에 중요한 inductive bias로 작용합니다.
+
 RL에서는 이를 핵심적인 inductive bias로 사용하여 로직을 구성하지만, 아직 Diffusion Policy에서는 phase feature를 이용해 Quadruped locomotion을 조작하려는 시도가 없었습니다.
 
 따라서, 본 프로젝트는 target phase trajectory를 Diffusion Policy의 condition으로 사용하여 원하는 보행 리듬을 따르는 controllable locomotion을 생성하는 것을 목표로 합니다.
+
 기본 Diffusion Policy는 최근 observation window만 조건으로 받아 다음 action chunk를 denoising합니다. 이 프로젝트는 여기에 보행 주기 정보를 단계적으로 추가하는 **4가지 모델**을 비교합니다.
 
 1. **Vanilla Diffusion Policy** — observation window만 global condition으로 사용.

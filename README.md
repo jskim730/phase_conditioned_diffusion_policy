@@ -2,14 +2,17 @@
 
 ## 핵심 아이디어
 
+Quadruped locomotion은 본질적으로 주기적인 phase 구조를 가지며, gait phase는 보행 제어에 중요한 inductive bias로 작용합니다. 
+RL에서는 이를 핵심적인 inductive bias로 사용하여 로직을 구성하지만, 아직 Diffusion Policy에서는 phase feature를 이용해 Quadruped locomotion을 조작하려는 시도가 없었습니다.
+따라서, 본 프로젝트는 target phase trajectory를 Diffusion Policy의 condition으로 사용하여 원하는 보행 리듬을 따르는 controllable locomotion을 생성하는 것을 목표로 합니다.
 기본 Diffusion Policy는 최근 observation window만 조건으로 받아 다음 action chunk를 denoising합니다. 이 프로젝트는 여기에 보행 주기 정보를 단계적으로 추가하는 **4가지 모델**을 비교합니다.
 
 1. **Vanilla Diffusion Policy** — observation window만 global condition으로 사용.
 2. **Periodic Phase Conditioning** — action chunk의 첫 phase `φ₀`를 `(cos φ₀, sin φ₀)`로 인코딩해 global condition에 붙임.
 3. **Phase Trajectory Conditioning** — action chunk 전체 phase trajectory `φ₀:H`를 step별 `(cos φₜ, sin φₜ)`로 인코딩하고 U-Net residual block에 **per-step FiLM** 방식으로 주입.
-4. **Phase Trajectory + Sync Loss (ours)** — Phase Trajectory 모델에 **frozen phase estimator**로부터의 phase synchronization loss(`L_total = L_diffusion + 0.12 · L_phase`)를 더해 15 epoch fine-tune. 평가 노트북에서는 `trajectory_sync` key.
+4. **Phase Trajectory + Sync Loss (ours)** — Phase Trajectory 모델에 **frozen phase estimator**로부터의 phase synchronization loss(`L_total = L_diffusion + 0.12 · L_phase`)를 더해 15 epoch fine-tune.
 
-현재 main contribution은 **Phase Trajectory + Sync Loss (ours)** 입니다. Phase Trajectory 모델은 sync loss의 효과를 보여주는 ablation 역할을 합니다.
+
 
 ## 핵심 결과
 

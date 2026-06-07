@@ -33,14 +33,42 @@ EVAL_CONFIG_NAMES: tuple[str, ...] = (
     "periodic_phase",
     "phase_trajectory",
     "phase_trajectory_sync",
+    "phase_trajectory_sync_low_noise",
+    "phase_trajectory_sync_velocity_dominant",
+    "phase_trajectory_sync_strong_velocity",
+    "phase_trajectory_sync_velocity_only",
 )
-MODEL_KEYS: tuple[str, ...] = ("vanilla", "periodic", "trajectory", "trajectory_sync")
-PHASE_MODEL_KEYS: tuple[str, ...] = ("periodic", "trajectory", "trajectory_sync")
+CONFIG_TO_MODEL_KEY: dict[str, str] = {
+    "vanilla": "vanilla",
+    "periodic_phase": "periodic",
+    "phase_trajectory": "trajectory",
+    "phase_trajectory_sync": "trajectory_sync",
+    "phase_trajectory_sync_low_noise": "trajectory_sync_low_noise",
+    "phase_trajectory_sync_velocity_dominant": "trajectory_sync_velocity_dominant",
+    "phase_trajectory_sync_strong_velocity": "trajectory_sync_strong_velocity",
+    "phase_trajectory_sync_velocity_only": "trajectory_sync_velocity_only",
+}
+MODEL_KEYS: tuple[str, ...] = tuple(CONFIG_TO_MODEL_KEY[name] for name in EVAL_CONFIG_NAMES)
+PHASE_MODEL_KEYS: tuple[str, ...] = tuple(key for key in MODEL_KEYS if key != "vanilla")
 SUMMARY_MODEL_LABELS: dict[str, str] = {
     "vanilla": "Vanilla DP",
     "periodic": "Periodic Phase",
     "trajectory": "Phase Trajectory",
-    "trajectory_sync": "Phase Trajectory + Sync (ours)",
+    "trajectory_sync": "Phase Trajectory + Sync v2 (Velocity + SNR)",
+    "trajectory_sync_low_noise": "Sync Low-Noise Only",
+    "trajectory_sync_velocity_dominant": "Sync Low-Noise Velocity-Dominant",
+    "trajectory_sync_strong_velocity": "Sync Low-Noise Strong Velocity",
+    "trajectory_sync_velocity_only": "Sync Low-Noise Velocity-Only",
+}
+CONFIG_USES_PHASE_TRAJECTORY: dict[str, bool] = {
+    "vanilla": False,
+    "periodic_phase": True,
+    "phase_trajectory": True,
+    "phase_trajectory_sync": True,
+    "phase_trajectory_sync_low_noise": True,
+    "phase_trajectory_sync_velocity_dominant": True,
+    "phase_trajectory_sync_strong_velocity": True,
+    "phase_trajectory_sync_velocity_only": True,
 }
 
 
@@ -118,27 +146,23 @@ def load_evaluation_state(
             cond_fn=cfg.resolve_sample_cond_fn(),
         )
 
-    model_specs = {
-        "vanilla": _spec_from_loaded(
-            loaded_models["vanilla"], label="Vanilla DP", uses_phase=False
-        ),
-        "periodic": _spec_from_loaded(
-            loaded_models["periodic_phase"], label="Periodic Phase", uses_phase=True
-        ),
-        "trajectory": _spec_from_loaded(
-            loaded_models["phase_trajectory"],
-            label="Phase Trajectory",
-            uses_phase=True,
-        ),
-        "trajectory_sync": _spec_from_loaded(
-            loaded_models["phase_trajectory_sync"],
-            label="Phase Trajectory + Sync (ours)",
-            uses_phase=True,
-        ),
-    }
+    unknown_configs = [name for name in configs if name not in CONFIG_TO_MODEL_KEY]
+    if unknown_configs:
+        raise KeyError(f"Missing evaluation mapping for configs: {unknown_configs}")
+
+    model_specs = {}
+    for config_name in config_names:
+        model_key = CONFIG_TO_MODEL_KEY[config_name]
+        model_specs[model_key] = _spec_from_loaded(
+            loaded_models[config_name],
+            label=SUMMARY_MODEL_LABELS[model_key],
+            uses_phase=CONFIG_USES_PHASE_TRAJECTORY[config_name],
+        )
 
     print("\n✓ Evaluation checkpoints loaded")
     for key in MODEL_KEYS:
+        if key not in model_specs:
+            continue
         spec = model_specs[key]
         print(
             f"  {spec.label:<18s}: {count_params(spec.model)['trainable'] / 1e6:.2f}M trainable"
@@ -374,7 +398,11 @@ PHASE_CONDITION_LABELS: dict[str, str] = {
     "vanilla": "none",
     "periodic": "first phase only",
     "trajectory": "full phase trajectory",
-    "trajectory_sync": "full phase trajectory + sync loss",
+    "trajectory_sync": "full phase trajectory + velocity/SNR sync loss",
+    "trajectory_sync_low_noise": "full phase trajectory + low-noise sync loss",
+    "trajectory_sync_velocity_dominant": "full phase trajectory + velocity-dominant sync loss",
+    "trajectory_sync_strong_velocity": "full phase trajectory + strong velocity sync loss",
+    "trajectory_sync_velocity_only": "full phase trajectory + velocity-only sync loss",
 }
 
 

@@ -212,12 +212,18 @@ class ExperimentConfig:
 
     def resolve_train_cond_fn(self) -> Callable[..., Any]:
         """Resolve the training conditioning function lazily."""
-        from .training import periodic_phase_cond_fn, trajectory_phase_cond_fn, vanilla_cond_fn
+        from .training import (
+            periodic_phase_cond_fn,
+            trajectory_phase_cond_fn,
+            trajectory_phase_continuation_cond_fn,
+            vanilla_cond_fn,
+        )
 
         cond_fns = {
             "vanilla_cond_fn": vanilla_cond_fn,
             "periodic_phase_cond_fn": periodic_phase_cond_fn,
             "trajectory_phase_cond_fn": trajectory_phase_cond_fn,
+            "trajectory_phase_continuation_cond_fn": trajectory_phase_continuation_cond_fn,
         }
         return cond_fns[self.train_cond_fn]
 
@@ -225,6 +231,7 @@ class ExperimentConfig:
         """Resolve the sampling conditioning function lazily."""
         from .sampling import (
             periodic_phase_sample_cond_fn,
+            trajectory_phase_continuation_sample_cond_fn,
             trajectory_phase_sample_cond_fn,
             vanilla_sample_cond_fn,
         )
@@ -233,12 +240,14 @@ class ExperimentConfig:
             "vanilla_sample_cond_fn": vanilla_sample_cond_fn,
             "periodic_phase_sample_cond_fn": periodic_phase_sample_cond_fn,
             "trajectory_phase_sample_cond_fn": trajectory_phase_sample_cond_fn,
+            "trajectory_phase_continuation_sample_cond_fn": trajectory_phase_continuation_sample_cond_fn,
         }
         return cond_fns[self.sample_cond_fn]
 
 
 _BASE_DATA = DataConfig()
 _BASE_MODEL = ModelConfig()
+_PHASE_CONTINUATION_MODEL = replace(_BASE_MODEL, per_step_cond_dim=4)
 _BASE_DIFFUSION = DiffusionConfig()
 _BASE_TRAINING = TrainingConfig()
 _BASE_EVALUATION = EvaluationConfig()
@@ -297,7 +306,24 @@ EXPERIMENT_CONFIGS: dict[VariantName, ExperimentConfig] = {
     ),
     "phase_trajectory_sync": ExperimentConfig(
         name="phase_trajectory_sync",
-        display_name="Phase Trajectory + Sync v2 (Velocity + SNR)",
+        display_name="Phase Trajectory + Sync Loss (main)",
+        model_builder="build_phase_trajectory_dp_model",
+        train_cond_fn="trajectory_phase_cond_fn",
+        sample_cond_fn="trajectory_phase_sample_cond_fn",
+        data=_BASE_DATA,
+        model=_BASE_MODEL,
+        diffusion=_BASE_DIFFUSION,
+        training=_BASE_TRAINING,
+        evaluation=_BASE_EVALUATION,
+        artifacts=ArtifactConfig(
+            checkpoint_name="phase_trajectory_sync_lambda0.12.pt",
+            loss_plot_name="phase_trajectory_sync_loss.png",
+        ),
+        tags=("phase", "per-step-cond", "sync", "ours"),
+    ),
+    "phase_trajectory_sync_v2": ExperimentConfig(
+        name="phase_trajectory_sync_v2",
+        display_name="Sync v2 (Velocity + SNR)",
         model_builder="build_phase_trajectory_dp_model",
         train_cond_fn="trajectory_phase_cond_fn",
         sample_cond_fn="trajectory_phase_sample_cond_fn",
@@ -308,77 +334,60 @@ EXPERIMENT_CONFIGS: dict[VariantName, ExperimentConfig] = {
         evaluation=_BASE_EVALUATION,
         artifacts=ArtifactConfig(
             checkpoint_name="phase_trajectory_sync_vel0.5_snr5_lambda0.12.pt",
-            loss_plot_name="phase_trajectory_sync_vel_snr_loss.png",
+            loss_plot_name="phase_trajectory_sync_v2_loss.png",
         ),
-        tags=("phase", "per-step-cond", "sync", "ours"),
+        tags=("phase", "per-step-cond", "sync-v2", "ablation"),
     ),
-    "phase_trajectory_sync_low_noise": ExperimentConfig(
-        name="phase_trajectory_sync_low_noise",
-        display_name="Sync Low-Noise Only",
+    "phase_continuation": ExperimentConfig(
+        name="phase_continuation",
+        display_name="Phase Continuation Conditioning",
         model_builder="build_phase_trajectory_dp_model",
-        train_cond_fn="trajectory_phase_cond_fn",
-        sample_cond_fn="trajectory_phase_sample_cond_fn",
+        train_cond_fn="trajectory_phase_continuation_cond_fn",
+        sample_cond_fn="trajectory_phase_continuation_sample_cond_fn",
         data=_BASE_DATA,
-        model=_BASE_MODEL,
+        model=_PHASE_CONTINUATION_MODEL,
         diffusion=_BASE_DIFFUSION,
         training=_BASE_TRAINING,
         evaluation=_BASE_EVALUATION,
         artifacts=ArtifactConfig(
-            checkpoint_name="phase_trajectory_sync_low_noise_t30_lambda0.12.pt",
-            loss_plot_name="phase_trajectory_sync_low_noise_loss.png",
+            checkpoint_name="phase_continuation_ckpt.pt",
+            loss_plot_name="phase_continuation_loss.png",
         ),
-        tags=("phase", "per-step-cond", "sync", "ablation", "low-noise"),
+        tags=("phase", "phase-continuation", "per-step-cond", "ablation-base"),
     ),
-    "phase_trajectory_sync_velocity_dominant": ExperimentConfig(
-        name="phase_trajectory_sync_velocity_dominant",
-        display_name="Sync Low-Noise Velocity-Dominant",
+    "phase_continuation_sync": ExperimentConfig(
+        name="phase_continuation_sync",
+        display_name="Phase Continuation + Sync Loss",
         model_builder="build_phase_trajectory_dp_model",
-        train_cond_fn="trajectory_phase_cond_fn",
-        sample_cond_fn="trajectory_phase_sample_cond_fn",
+        train_cond_fn="trajectory_phase_continuation_cond_fn",
+        sample_cond_fn="trajectory_phase_continuation_sample_cond_fn",
         data=_BASE_DATA,
-        model=_BASE_MODEL,
+        model=_PHASE_CONTINUATION_MODEL,
         diffusion=_BASE_DIFFUSION,
         training=_BASE_TRAINING,
         evaluation=_BASE_EVALUATION,
         artifacts=ArtifactConfig(
-            checkpoint_name="phase_trajectory_sync_veldom_t30_lambda0.12.pt",
-            loss_plot_name="phase_trajectory_sync_veldom_loss.png",
+            checkpoint_name="phase_continuation_sync_lambda0.12.pt",
+            loss_plot_name="phase_continuation_sync_loss.png",
         ),
-        tags=("phase", "per-step-cond", "sync", "ablation", "velocity-dominant"),
+        tags=("phase", "phase-continuation", "sync", "ablation"),
     ),
-    "phase_trajectory_sync_strong_velocity": ExperimentConfig(
-        name="phase_trajectory_sync_strong_velocity",
-        display_name="Sync Low-Noise Strong Velocity",
+    "phase_continuation_sync_v2": ExperimentConfig(
+        name="phase_continuation_sync_v2",
+        display_name="Phase Continuation + Sync v2",
         model_builder="build_phase_trajectory_dp_model",
-        train_cond_fn="trajectory_phase_cond_fn",
-        sample_cond_fn="trajectory_phase_sample_cond_fn",
+        train_cond_fn="trajectory_phase_continuation_cond_fn",
+        sample_cond_fn="trajectory_phase_continuation_sample_cond_fn",
         data=_BASE_DATA,
-        model=_BASE_MODEL,
+        model=_PHASE_CONTINUATION_MODEL,
         diffusion=_BASE_DIFFUSION,
         training=_BASE_TRAINING,
         evaluation=_BASE_EVALUATION,
         artifacts=ArtifactConfig(
-            checkpoint_name="phase_trajectory_sync_strongvel_t30_lambda0.12.pt",
-            loss_plot_name="phase_trajectory_sync_strongvel_loss.png",
+            checkpoint_name="phase_continuation_sync_v2_vel0.5_snr5_lambda0.12.pt",
+            loss_plot_name="phase_continuation_sync_v2_loss.png",
         ),
-        tags=("phase", "per-step-cond", "sync", "ablation", "strong-velocity"),
-    ),
-    "phase_trajectory_sync_velocity_only": ExperimentConfig(
-        name="phase_trajectory_sync_velocity_only",
-        display_name="Sync Low-Noise Velocity-Only",
-        model_builder="build_phase_trajectory_dp_model",
-        train_cond_fn="trajectory_phase_cond_fn",
-        sample_cond_fn="trajectory_phase_sample_cond_fn",
-        data=_BASE_DATA,
-        model=_BASE_MODEL,
-        diffusion=_BASE_DIFFUSION,
-        training=_BASE_TRAINING,
-        evaluation=_BASE_EVALUATION,
-        artifacts=ArtifactConfig(
-            checkpoint_name="phase_trajectory_sync_velonly_t30_lambda0.12.pt",
-            loss_plot_name="phase_trajectory_sync_velonly_loss.png",
-        ),
-        tags=("phase", "per-step-cond", "sync", "ablation", "velocity-only"),
+        tags=("phase", "phase-continuation", "sync-v2", "ablation"),
     ),
 }
 

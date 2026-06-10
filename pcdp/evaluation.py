@@ -1,4 +1,4 @@
-"""Official evaluation orchestration routines for notebook 05.
+"""Official evaluation orchestration routines for notebook 06.
 
 The evaluation notebook should only orchestrate these functions.  Model loading,
 rollout protocol construction, frequency sweeps, tabulation, and result
@@ -33,42 +33,47 @@ EVAL_CONFIG_NAMES: tuple[str, ...] = (
     "periodic_phase",
     "phase_trajectory",
     "phase_trajectory_sync",
-    "phase_trajectory_sync_low_noise",
-    "phase_trajectory_sync_velocity_dominant",
-    "phase_trajectory_sync_strong_velocity",
-    "phase_trajectory_sync_velocity_only",
+)
+SYNC_CONTINUATION_ABLATION_CONFIG_NAMES: tuple[str, ...] = (
+    "phase_trajectory_sync",
+    "phase_trajectory_sync_v2",
+    "phase_continuation_sync",
+    "phase_continuation_sync_v2",
 )
 CONFIG_TO_MODEL_KEY: dict[str, str] = {
     "vanilla": "vanilla",
     "periodic_phase": "periodic",
     "phase_trajectory": "trajectory",
     "phase_trajectory_sync": "trajectory_sync",
-    "phase_trajectory_sync_low_noise": "trajectory_sync_low_noise",
-    "phase_trajectory_sync_velocity_dominant": "trajectory_sync_velocity_dominant",
-    "phase_trajectory_sync_strong_velocity": "trajectory_sync_strong_velocity",
-    "phase_trajectory_sync_velocity_only": "trajectory_sync_velocity_only",
+    "phase_trajectory_sync_v2": "trajectory_sync_v2",
+    "phase_continuation": "phase_continuation",
+    "phase_continuation_sync": "phase_continuation_sync",
+    "phase_continuation_sync_v2": "phase_continuation_sync_v2",
 }
 MODEL_KEYS: tuple[str, ...] = tuple(CONFIG_TO_MODEL_KEY[name] for name in EVAL_CONFIG_NAMES)
 PHASE_MODEL_KEYS: tuple[str, ...] = tuple(key for key in MODEL_KEYS if key != "vanilla")
+SYNC_CONTINUATION_ABLATION_MODEL_KEYS: tuple[str, ...] = tuple(
+    CONFIG_TO_MODEL_KEY[name] for name in SYNC_CONTINUATION_ABLATION_CONFIG_NAMES
+)
 SUMMARY_MODEL_LABELS: dict[str, str] = {
     "vanilla": "Vanilla DP",
     "periodic": "Periodic Phase",
     "trajectory": "Phase Trajectory",
-    "trajectory_sync": "Phase Trajectory + Sync v2 (Velocity + SNR)",
-    "trajectory_sync_low_noise": "Sync Low-Noise Only",
-    "trajectory_sync_velocity_dominant": "Sync Low-Noise Velocity-Dominant",
-    "trajectory_sync_strong_velocity": "Sync Low-Noise Strong Velocity",
-    "trajectory_sync_velocity_only": "Sync Low-Noise Velocity-Only",
+    "trajectory_sync": "Phase Trajectory + Sync Loss (main)",
+    "trajectory_sync_v2": "Sync v2 (Velocity + SNR)",
+    "phase_continuation": "Phase Continuation",
+    "phase_continuation_sync": "Phase Continuation + Sync Loss",
+    "phase_continuation_sync_v2": "Phase Continuation + Sync v2",
 }
 CONFIG_USES_PHASE_TRAJECTORY: dict[str, bool] = {
     "vanilla": False,
     "periodic_phase": True,
     "phase_trajectory": True,
     "phase_trajectory_sync": True,
-    "phase_trajectory_sync_low_noise": True,
-    "phase_trajectory_sync_velocity_dominant": True,
-    "phase_trajectory_sync_strong_velocity": True,
-    "phase_trajectory_sync_velocity_only": True,
+    "phase_trajectory_sync_v2": True,
+    "phase_continuation": True,
+    "phase_continuation_sync": True,
+    "phase_continuation_sync_v2": True,
 }
 
 
@@ -125,7 +130,7 @@ def load_evaluation_state(
 ) -> EvaluationState:
     """Load all notebook-05 checkpoints with best EMA weights applied."""
     configs = {name: get_experiment_config(name) for name in config_names}
-    base_cfg = configs["vanilla"]
+    base_cfg = configs["vanilla"] if "vanilla" in configs else next(iter(configs.values()))
     loaded_models: dict[str, LoadedEvalModel] = {}
 
     for name, cfg in configs.items():
@@ -160,7 +165,8 @@ def load_evaluation_state(
         )
 
     print("\n✓ Evaluation checkpoints loaded")
-    for key in MODEL_KEYS:
+    display_keys = tuple(CONFIG_TO_MODEL_KEY[name] for name in config_names)
+    for key in display_keys:
         if key not in model_specs:
             continue
         spec = model_specs[key]
@@ -286,16 +292,18 @@ def run_in_distribution_evaluation(
     env,
     data: Mapping[str, object],
     device: str,
+    model_keys: Optional[Sequence[str]] = None,
     n_seeds: int,
     max_steps: int,
     dt: float = 0.05,
 ) -> dict[str, list[dict]]:
-    """Evaluate all three models at the training mean frequency."""
+    """Evaluate configured models at the training mean frequency."""
     freq_hz = float(data["freq_window_mean"])
     print(f"=== Table 1: In-dist @ f={freq_hz:.3f} Hz, n={n_seeds} seeds ===\n")
     results: dict[str, list[dict]] = {}
     t0 = time.time()
-    for model_key in MODEL_KEYS:
+    keys = tuple(model_keys) if model_keys is not None else tuple(state.model_specs.keys())
+    for model_key in keys:
         print(f"\n--- {state.model_specs[model_key].label} ---")
         results[model_key] = evaluate_model_at_frequency(
             state,
@@ -398,11 +406,11 @@ PHASE_CONDITION_LABELS: dict[str, str] = {
     "vanilla": "none",
     "periodic": "first phase only",
     "trajectory": "full phase trajectory",
-    "trajectory_sync": "full phase trajectory + velocity/SNR sync loss",
-    "trajectory_sync_low_noise": "full phase trajectory + low-noise sync loss",
-    "trajectory_sync_velocity_dominant": "full phase trajectory + velocity-dominant sync loss",
-    "trajectory_sync_strong_velocity": "full phase trajectory + strong velocity sync loss",
-    "trajectory_sync_velocity_only": "full phase trajectory + velocity-only sync loss",
+    "trajectory_sync": "full phase trajectory + sync loss",
+    "trajectory_sync_v2": "full phase trajectory + velocity/SNR sync loss",
+    "phase_continuation": "phase + phase advance condition",
+    "phase_continuation_sync": "phase continuation + sync loss",
+    "phase_continuation_sync_v2": "phase continuation + velocity/SNR sync loss",
 }
 
 
@@ -463,6 +471,7 @@ def write_table1_summary_markdown(
     output_path: str | Path,
     *,
     freq_hz: float,
+    model_keys: Optional[Sequence[str]] = None,
     interval: str = "ci95",
 ) -> Path:
     """Export Table 1 (in-distribution gait quality) with best values bolded.
@@ -474,14 +483,19 @@ def write_table1_summary_markdown(
     """
     import pandas as pd
 
-    vanilla_rps_mean = float(np.nanmean(metric_array(table1_results["vanilla"], "reward_per_step")))
+    keys = tuple(model_keys) if model_keys is not None else tuple(table1_results.keys())
+    vanilla_rps_mean = (
+        float(np.nanmean(metric_array(table1_results["vanilla"], "reward_per_step")))
+        if "vanilla" in table1_results
+        else float("nan")
+    )
     rows = []
-    for key in MODEL_KEYS:
+    for key in keys:
         surv, _rew = result_arrays(table1_results[key])
         rps = metric_array(table1_results[key], "reward_per_step")
         xvel = metric_array(table1_results[key], "mean_x_velocity")
         fmeas = metric_array(table1_results[key], "measured_freq_hz")
-        rps_delta = float(np.nanmean(rps)) - vanilla_rps_mean
+        rps_delta = float(np.nanmean(rps)) - vanilla_rps_mean if np.isfinite(vanilla_rps_mean) else float("nan")
         rows.append({
             "Model": state.model_specs[key].label,
             "Phase condition": PHASE_CONDITION_LABELS[key],
@@ -503,6 +517,7 @@ def write_frequency_tracking_table_markdown(
     sweep_results: Mapping[str, Mapping[float, list[dict]]],
     output_path: str | Path,
     *,
+    model_keys: Optional[Sequence[str]] = None,
     interval: str = "ci95",
 ) -> Path:
     """Export Table 2 (command-frequency tracking) with best values bolded per row pair.
@@ -515,9 +530,10 @@ def write_frequency_tracking_table_markdown(
     import pandas as pd
 
     rows = []
+    keys = tuple(model_keys) if model_keys is not None else tuple(sweep_results.keys())
     for freq, zone in zip(protocol.sweep_freqs, protocol.zone_labels):
         freq = float(freq)
-        for model_key in PHASE_MODEL_KEYS:
+        for model_key in keys:
             rollouts = sweep_results[model_key][freq]
             rows.append({
                 "Target freq (Hz)": f"{freq:.3f}",
@@ -530,23 +546,28 @@ def write_frequency_tracking_table_markdown(
             })
     df = pd.DataFrame(rows)
     # Bold best per freq pair (rows 2i and 2i+1)
-    for start in range(0, len(df), len(PHASE_MODEL_KEYS)):
-        chunk = df.iloc[start:start + len(PHASE_MODEL_KEYS)]
+    for start in range(0, len(df), len(keys)):
+        chunk = df.iloc[start:start + len(keys)]
         _bold_best(chunk, ["|freq error| (Hz) ↓"], higher_is_better=False)
         _bold_best(chunk, ["PLV ↑", "Reward / step ↑"], higher_is_better=True)
-        df.iloc[start:start + len(PHASE_MODEL_KEYS)] = chunk
+        df.iloc[start:start + len(keys)] = chunk
     return _write(df, Path(output_path), title="Table 2. Frequency command tracking")
 
 
 def print_table1_summary(
-    state: EvaluationState, table1_results: Mapping[str, list[dict]], *, freq_hz: float
+    state: EvaluationState,
+    table1_results: Mapping[str, list[dict]],
+    *,
+    freq_hz: float,
+    model_keys: Optional[Sequence[str]] = None,
 ) -> None:
     """Print Table 1 to the console using the same pandas formatting."""
     import pandas as pd
 
     n_seeds = len(next(iter(table1_results.values())))
     rows = []
-    for key in MODEL_KEYS:
+    keys = tuple(model_keys) if model_keys is not None else tuple(table1_results.keys())
+    for key in keys:
         surv, _rew = result_arrays(table1_results[key])
         rps = metric_array(table1_results[key], "reward_per_step")
         xvel = metric_array(table1_results[key], "mean_x_velocity")
@@ -566,14 +587,17 @@ def print_frequency_sweep_summary(
     data: Mapping[str, object],
     protocol: FrequencySweepProtocol,
     sweep_results: Mapping[str, Mapping[float, list[dict]]],
+    *,
+    model_keys: Optional[Sequence[str]] = None,
 ) -> None:
     """Print Table 2 to the console using the same pandas formatting."""
     import pandas as pd
 
     rows = []
+    keys = tuple(model_keys) if model_keys is not None else tuple(sweep_results.keys())
     for freq, zone in zip(protocol.sweep_freqs, protocol.zone_labels):
         freq = float(freq)
-        for model_key in PHASE_MODEL_KEYS:
+        for model_key in keys:
             rollouts = sweep_results[model_key][freq]
             rows.append({
                 "freq_cmd": f"{freq:.3f}",
@@ -615,6 +639,8 @@ def build_eval_results_payload(
     freq_protocol: FrequencySweepProtocol,
     freq_results: Mapping[str, Mapping[float, list[dict]]],
     *,
+    model_keys: Optional[Sequence[str]] = None,
+    phase_model_keys: Optional[Sequence[str]] = None,
     n_seeds_indist: int,
     n_seeds_sweep: int,
 ) -> dict[str, np.ndarray]:
@@ -631,14 +657,53 @@ def build_eval_results_payload(
         "sweep_zone_labels": np.asarray(freq_protocol.zone_labels),
     }
 
-    for key in MODEL_KEYS:
+    keys = tuple(model_keys) if model_keys is not None else tuple(table1_results.keys())
+    phase_keys = tuple(phase_model_keys) if phase_model_keys is not None else tuple(freq_results.keys())
+
+    for key in keys:
         survival, reward = result_arrays(table1_results[key])
         payload[f"table1_{key}_survival"] = survival
         payload[f"table1_{key}_reward"] = reward
         _add_metric_vectors(payload, f"table1_{key}", table1_results[key])
 
     _add_grid_results(
-        payload, prefix="freq", grid=freq_protocol.sweep_freqs, results=freq_results
+        payload,
+        prefix="freq",
+        grid=freq_protocol.sweep_freqs,
+        results=freq_results,
+        model_keys=phase_keys,
+    )
+    return payload
+
+
+def build_frequency_sweep_results_payload(
+    data: Mapping[str, object],
+    freq_protocol: FrequencySweepProtocol,
+    freq_results: Mapping[str, Mapping[float, list[dict]]],
+    *,
+    model_keys: Optional[Sequence[str]] = None,
+    n_seeds_sweep: int,
+) -> dict[str, np.ndarray]:
+    """Convert frequency-sweep-only ablation results into NPZ arrays."""
+
+    keys = tuple(model_keys) if model_keys is not None else tuple(freq_results.keys())
+    payload: dict[str, np.ndarray] = {
+        "n_seeds_sweep": np.asarray(n_seeds_sweep, dtype=np.int32),
+        "f_mean": np.asarray(float(data["freq_window_mean"]), dtype=np.float32),
+        "freq_window_min": np.asarray(float(data["freq_window_min"]), dtype=np.float32),
+        "freq_window_max": np.asarray(float(data["freq_window_max"]), dtype=np.float32),
+        "in_freqs": np.asarray(freq_protocol.in_freqs, dtype=np.float32),
+        "ood_freqs": np.asarray(freq_protocol.ood_freqs, dtype=np.float32),
+        "sweep_freqs": np.asarray(freq_protocol.sweep_freqs, dtype=np.float32),
+        "sweep_zone_labels": np.asarray(freq_protocol.zone_labels),
+        "model_keys": np.asarray(keys),
+    }
+    _add_grid_results(
+        payload,
+        prefix="freq",
+        grid=freq_protocol.sweep_freqs,
+        results=freq_results,
+        model_keys=keys,
     )
     return payload
 
@@ -672,6 +737,7 @@ def _add_grid_results(
     prefix: str,
     grid: Sequence[float],
     results: Mapping[str, Mapping[float, list[dict]]],
+    model_keys: Optional[Sequence[str]] = None,
 ) -> None:
     metric_keys = (
         "survival",
@@ -689,7 +755,8 @@ def _add_grid_results(
         "phase_offset_error",
         "abs_phase_offset_error",
     )
-    for model_key in PHASE_MODEL_KEYS:
+    keys = tuple(model_keys) if model_keys is not None else tuple(results.keys())
+    for model_key in keys:
         rows_by_metric: dict[str, list[np.ndarray]] = {key: [] for key in metric_keys}
         for value in grid:
             rows = results[model_key][float(value)]

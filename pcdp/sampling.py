@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from typing import Callable, Optional
 
-from .dataset import encode_phase_cossin
+from .dataset import encode_phase_continuation_cossin, encode_phase_cossin
 
 
 # =====================================================================
@@ -63,6 +63,20 @@ def trajectory_phase_sample_cond_fn(obs_window: torch.Tensor,
 
     global_cond = obs_window.flatten(start_dim=1)
     per_step_cond = encode_phase_cossin(phase_chunk)
+    return global_cond, per_step_cond
+
+
+def trajectory_phase_continuation_sample_cond_fn(
+    obs_window: torch.Tensor,
+    phase_chunk: torch.Tensor,
+    device: str = 'cuda',
+):
+    """Sampling-time phase continuation condition with four per-step channels."""
+    obs_window = obs_window.to(device)
+    phase_chunk = phase_chunk.to(device)
+
+    global_cond = obs_window.flatten(start_dim=1)
+    per_step_cond = encode_phase_continuation_cossin(phase_chunk)
     return global_cond, per_step_cond
 
 

@@ -378,7 +378,6 @@ def phase_sync_loss_components(
     noise_scheduler=None,
     snr_gamma: float | None = None,
     snr_floor: float = 0.05,
-    low_noise_t_max: int | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Compute phase sync loss with optional velocity and SNR weighting."""
 
@@ -408,26 +407,15 @@ def phase_sync_loss_components(
             floor=snr_floor,
         ).to(dtype=unweighted_sync.dtype)
 
-    if low_noise_t_max is None:
-        active_mask = torch.ones_like(unweighted_sync)
-    else:
-        if timesteps is None:
-            raise ValueError("timesteps are required for low-noise sync masking")
-        active_mask = (timesteps <= int(low_noise_t_max)).to(dtype=unweighted_sync.dtype)
-
-    sync_weight = snr_weight * active_mask
+    sync_weight = snr_weight
     weighted_sync = unweighted_sync * sync_weight
-    if low_noise_t_max is None:
-        loss = weighted_sync.mean()
-    else:
-        loss = weighted_sync.sum() / sync_weight.sum().clamp_min(1.0)
+    loss = weighted_sync.mean()
 
     metrics = {
         "phase_abs_loss": abs_loss.mean().detach(),
         "phase_velocity_loss": velocity_loss.mean().detach(),
         "phase_loss_unweighted": unweighted_sync.mean().detach(),
         "phase_snr_weight": snr_weight.mean().detach(),
-        "phase_sync_active_fraction": active_mask.mean().detach(),
     }
     return loss, metrics
 
@@ -444,7 +432,6 @@ def phase_sync_loss(
     noise_scheduler=None,
     snr_gamma: float | None = None,
     snr_floor: float = 0.05,
-    low_noise_t_max: int | None = None,
 ) -> torch.Tensor:
     """Compute frozen-estimator phase synchronization loss."""
 
@@ -459,7 +446,6 @@ def phase_sync_loss(
         noise_scheduler=noise_scheduler,
         snr_gamma=snr_gamma,
         snr_floor=snr_floor,
-        low_noise_t_max=low_noise_t_max,
     )
     return loss
 
@@ -479,7 +465,6 @@ def evaluate_phase_sync_diffusion_policy(
     phase_velocity_weight: float = 0.0,
     snr_gamma: float | None = None,
     snr_floor: float = 0.05,
-    low_noise_t_max: int | None = None,
     n_batches: int | None = None,
 ) -> dict[str, float]:
     """Validation metrics for phase-sync fine-tuning."""
@@ -494,7 +479,6 @@ def evaluate_phase_sync_diffusion_policy(
     phase_velocity_losses: list[float] = []
     phase_unweighted_losses: list[float] = []
     phase_snr_weights: list[float] = []
-    phase_sync_active_fractions: list[float] = []
 
     for i, batch in enumerate(val_loader):
         if n_batches is not None and i >= n_batches:
@@ -523,7 +507,6 @@ def evaluate_phase_sync_diffusion_policy(
             noise_scheduler=noise_scheduler,
             snr_gamma=snr_gamma,
             snr_floor=snr_floor,
-            low_noise_t_max=low_noise_t_max,
         )
 
         diffusion_losses.append(float(diffusion_loss.item()))
@@ -532,7 +515,6 @@ def evaluate_phase_sync_diffusion_policy(
         phase_velocity_losses.append(float(p_metrics["phase_velocity_loss"].item()))
         phase_unweighted_losses.append(float(p_metrics["phase_loss_unweighted"].item()))
         phase_snr_weights.append(float(p_metrics["phase_snr_weight"].item()))
-        phase_sync_active_fractions.append(float(p_metrics["phase_sync_active_fraction"].item()))
 
     ema.restore(model.parameters())
     model.train()
@@ -543,7 +525,6 @@ def evaluate_phase_sync_diffusion_policy(
         "phase_velocity_loss": float(np.mean(phase_velocity_losses)),
         "phase_loss_unweighted": float(np.mean(phase_unweighted_losses)),
         "phase_snr_weight": float(np.mean(phase_snr_weights)),
-        "phase_sync_active_fraction": float(np.mean(phase_sync_active_fractions)),
         "total_loss": float(np.mean(diffusion_losses) + lambda_phase * np.mean(phase_losses)),
     }
 
@@ -566,7 +547,6 @@ def train_phase_sync_diffusion_policy(
     phase_velocity_weight: float = 0.0,
     snr_gamma: float | None = None,
     snr_floor: float = 0.05,
-    low_noise_t_max: int | None = None,
     phase_warmup_epochs: int = 1,
     val_every: int = 1,
     val_n_batches: int | None = 8,
@@ -592,7 +572,6 @@ def train_phase_sync_diffusion_policy(
         phase_velocity_losses: list[float] = []
         phase_unweighted_losses: list[float] = []
         phase_snr_weights: list[float] = []
-        phase_sync_active_fractions: list[float] = []
         use_phase = epoch >= phase_warmup_epochs
 
         for batch in train_loader:
@@ -615,7 +594,6 @@ def train_phase_sync_diffusion_policy(
                 "phase_velocity_loss": torch.zeros((), device=device),
                 "phase_loss_unweighted": torch.zeros((), device=device),
                 "phase_snr_weight": torch.zeros((), device=device),
-                "phase_sync_active_fraction": torch.zeros((), device=device),
             }
             if use_phase and lambda_phase > 0:
                 x0_hat = predict_x0_from_epsilon(noisy_action, noise_pred, t, noise_scheduler)
@@ -630,7 +608,6 @@ def train_phase_sync_diffusion_policy(
                     noise_scheduler=noise_scheduler,
                     snr_gamma=snr_gamma,
                     snr_floor=snr_floor,
-                    low_noise_t_max=low_noise_t_max,
                 )
             loss = diffusion_loss + lambda_phase * p_loss
 
@@ -647,7 +624,6 @@ def train_phase_sync_diffusion_policy(
             phase_velocity_losses.append(float(p_metrics["phase_velocity_loss"].item()))
             phase_unweighted_losses.append(float(p_metrics["phase_loss_unweighted"].item()))
             phase_snr_weights.append(float(p_metrics["phase_snr_weight"].item()))
-            phase_sync_active_fractions.append(float(p_metrics["phase_sync_active_fraction"].item()))
             global_step += 1
             if global_step % log_every_step == 0:
                 print(
@@ -656,7 +632,6 @@ def train_phase_sync_diffusion_policy(
                     f"phase {np.mean(phase_losses[-50:]):.5f} | "
                     f"vel {np.mean(phase_velocity_losses[-50:]):.5f} | "
                     f"snr {np.mean(phase_snr_weights[-50:]):.3f} | "
-                    f"active {np.mean(phase_sync_active_fractions[-50:]):.2f} | "
                     f"elapsed {time.time() - t0:.0f}s"
                 )
 
@@ -668,7 +643,6 @@ def train_phase_sync_diffusion_policy(
             "phase_velocity_loss": float(np.mean(phase_velocity_losses)),
             "phase_loss_unweighted": float(np.mean(phase_unweighted_losses)),
             "phase_snr_weight": float(np.mean(phase_snr_weights)),
-            "phase_sync_active_fraction": float(np.mean(phase_sync_active_fractions)),
             "total_loss": float(np.mean(diffusion_losses) + lambda_phase * np.mean(phase_losses)),
             "phase_enabled": float(use_phase),
         }
@@ -688,7 +662,6 @@ def train_phase_sync_diffusion_policy(
                 phase_velocity_weight=phase_velocity_weight,
                 snr_gamma=snr_gamma,
                 snr_floor=snr_floor,
-                low_noise_t_max=low_noise_t_max,
                 n_batches=val_n_batches,
             )
             metrics = {"epoch": float(epoch + 1), **metrics}
@@ -696,8 +669,7 @@ def train_phase_sync_diffusion_policy(
             print(
                 f"  >> sync epoch {epoch + 1}: train {train_metrics['total_loss']:.5f} | "
                 f"val {metrics['total_loss']:.5f} | phase {metrics['phase_loss']:.5f} | "
-                f"vel {metrics['phase_velocity_loss']:.5f} | "
-                f"active {metrics['phase_sync_active_fraction']:.2f}"
+                f"vel {metrics['phase_velocity_loss']:.5f}"
             )
             if metrics["total_loss"] < best_val:
                 best_val = metrics["total_loss"]

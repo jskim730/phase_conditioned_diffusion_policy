@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from typing import Callable, Optional
 
-from .dataset import encode_phase_cossin
+from .dataset import encode_phase_continuation_cossin, encode_phase_cossin
 
 
 # =====================================================================
@@ -46,6 +46,20 @@ def trajectory_phase_cond_fn(batch: dict, device: str):
 
     global_cond = obs.flatten(start_dim=1)
     per_step_cond = encode_phase_cossin(phase)             # (B, PH, 2)
+    return global_cond, per_step_cond
+
+
+def trajectory_phase_continuation_cond_fn(batch: dict, device: str):
+    """Per-step phase plus phase-advance continuation conditioning.
+
+    per_step_cond = (cos phi_t, sin phi_t, cos delta_phi_t, sin delta_phi_t)
+    for each chunk step, shaped ``(B, PH, 4)``.
+    """
+    obs = batch['obs'].to(device, non_blocking=True)
+    phase = batch['phase'].to(device, non_blocking=True)
+
+    global_cond = obs.flatten(start_dim=1)
+    per_step_cond = encode_phase_continuation_cossin(phase)
     return global_cond, per_step_cond
 
 

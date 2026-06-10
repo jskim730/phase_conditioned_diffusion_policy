@@ -30,6 +30,19 @@ def encode_phase_cossin(phase: torch.Tensor) -> torch.Tensor:
     return torch.stack([torch.cos(phase), torch.sin(phase)], dim=-1)
 
 
+def encode_phase_continuation_cossin(phase: torch.Tensor) -> torch.Tensor:
+    """Encode phase and per-step phase advance as ``(cos, sin)`` features."""
+
+    phase_enc = encode_phase_cossin(phase)
+    if phase.shape[-1] < 2:
+        delta = torch.zeros_like(phase)
+    else:
+        delta = torch.diff(phase, dim=-1, prepend=phase[..., :1])
+        delta[..., 0] = delta[..., 1]
+    delta_enc = encode_phase_cossin(delta)
+    return torch.cat([phase_enc, delta_enc], dim=-1)
+
+
 # =====================================================================
 # Dataset
 # =====================================================================

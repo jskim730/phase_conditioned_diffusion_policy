@@ -27,40 +27,40 @@ MODEL_COLORS: dict[str, str] = {
     "periodic": "tab:green",
     "trajectory": "#ff9999",            # light red — sync-less ablation
     "trajectory_sync": "tab:red",  # strong red — ours (sync fine-tune)
-    "trajectory_sync_low_noise": "tab:purple",
-    "trajectory_sync_velocity_dominant": "tab:orange",
-    "trajectory_sync_strong_velocity": "tab:cyan",
-    "trajectory_sync_velocity_only": "tab:olive",
+    "trajectory_sync_v2": "tab:orange",
+    "phase_continuation": "tab:purple",
+    "phase_continuation_sync": "tab:cyan",
+    "phase_continuation_sync_v2": "tab:olive",
 }
 MODEL_LINEWIDTH: dict[str, float] = {
     "vanilla": 1.6,
     "periodic": 1.7,
     "trajectory": 1.7,
     "trajectory_sync": 2.6,
-    "trajectory_sync_low_noise": 1.9,
-    "trajectory_sync_velocity_dominant": 2.2,
-    "trajectory_sync_strong_velocity": 2.0,
-    "trajectory_sync_velocity_only": 1.9,
+    "trajectory_sync_v2": 2.0,
+    "phase_continuation": 1.8,
+    "phase_continuation_sync": 2.0,
+    "phase_continuation_sync_v2": 2.2,
 }
 MODEL_MARKERSIZE: dict[str, float] = {
     "vanilla": 7,
     "periodic": 7,
     "trajectory": 7,
     "trajectory_sync": 9,
-    "trajectory_sync_low_noise": 7,
-    "trajectory_sync_velocity_dominant": 8,
-    "trajectory_sync_strong_velocity": 7,
-    "trajectory_sync_velocity_only": 7,
+    "trajectory_sync_v2": 8,
+    "phase_continuation": 7,
+    "phase_continuation_sync": 8,
+    "phase_continuation_sync_v2": 8,
 }
 MODEL_FMT: dict[str, str] = {
     "vanilla": "D-",
     "periodic": "s-",
     "trajectory": "^-",
     "trajectory_sync": "o-",
-    "trajectory_sync_low_noise": "P-",
-    "trajectory_sync_velocity_dominant": "X-",
-    "trajectory_sync_strong_velocity": "v-",
-    "trajectory_sync_velocity_only": "*-",
+    "trajectory_sync_v2": "X-",
+    "phase_continuation": "P-",
+    "phase_continuation_sync": "v-",
+    "phase_continuation_sync_v2": "*-",
 }
 _FALLBACK_COLOR_CYCLE = ("tab:purple", "tab:brown", "tab:cyan", "tab:olive")
 

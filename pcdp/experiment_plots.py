@@ -31,6 +31,10 @@ MODEL_COLORS: dict[str, str] = {
     "phase_continuation": "tab:purple",
     "phase_continuation_sync": "tab:cyan",
     "phase_continuation_sync_v2": "tab:olive",
+    "trajectory_sync_abs_l018": "#b2182b",
+    "trajectory_sync_v2_l008": "#fdae61",
+    "trajectory_sync_v2_vel025_snr10": "#d6604d",
+    "phase_continuation_sync_soft": "#5e3c99",
 }
 MODEL_LINEWIDTH: dict[str, float] = {
     "vanilla": 1.6,
@@ -41,6 +45,10 @@ MODEL_LINEWIDTH: dict[str, float] = {
     "phase_continuation": 1.8,
     "phase_continuation_sync": 2.0,
     "phase_continuation_sync_v2": 2.2,
+    "trajectory_sync_abs_l018": 2.2,
+    "trajectory_sync_v2_l008": 2.0,
+    "trajectory_sync_v2_vel025_snr10": 2.0,
+    "phase_continuation_sync_soft": 2.0,
 }
 MODEL_MARKERSIZE: dict[str, float] = {
     "vanilla": 7,
@@ -51,6 +59,10 @@ MODEL_MARKERSIZE: dict[str, float] = {
     "phase_continuation": 7,
     "phase_continuation_sync": 8,
     "phase_continuation_sync_v2": 8,
+    "trajectory_sync_abs_l018": 8,
+    "trajectory_sync_v2_l008": 8,
+    "trajectory_sync_v2_vel025_snr10": 8,
+    "phase_continuation_sync_soft": 8,
 }
 MODEL_FMT: dict[str, str] = {
     "vanilla": "D-",
@@ -61,6 +73,10 @@ MODEL_FMT: dict[str, str] = {
     "phase_continuation": "P-",
     "phase_continuation_sync": "v-",
     "phase_continuation_sync_v2": "*-",
+    "trajectory_sync_abs_l018": "h-",
+    "trajectory_sync_v2_l008": "X-",
+    "trajectory_sync_v2_vel025_snr10": "d-",
+    "phase_continuation_sync_soft": "p-",
 }
 _FALLBACK_COLOR_CYCLE = ("tab:purple", "tab:brown", "tab:cyan", "tab:olive")
 

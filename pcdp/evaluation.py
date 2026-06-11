@@ -40,6 +40,18 @@ SYNC_CONTINUATION_ABLATION_CONFIG_NAMES: tuple[str, ...] = (
     "phase_continuation_sync",
     "phase_continuation_sync_v2",
 )
+SYNC_HPARAM_EXTRA_CONFIG_NAMES: tuple[str, ...] = (
+    "phase_trajectory_sync_abs_l018",
+    "phase_trajectory_sync_v2_l008",
+    "phase_trajectory_sync_v2_vel025_snr10",
+    "phase_continuation_sync_soft",
+)
+SYNC_HPARAM_SWEEP_CONFIG_NAMES: tuple[str, ...] = (
+    "phase_trajectory_sync",
+    "phase_trajectory_sync_v2",
+    "phase_continuation_sync",
+    *SYNC_HPARAM_EXTRA_CONFIG_NAMES,
+)
 CONFIG_TO_MODEL_KEY: dict[str, str] = {
     "vanilla": "vanilla",
     "periodic_phase": "periodic",
@@ -49,11 +61,21 @@ CONFIG_TO_MODEL_KEY: dict[str, str] = {
     "phase_continuation": "phase_continuation",
     "phase_continuation_sync": "phase_continuation_sync",
     "phase_continuation_sync_v2": "phase_continuation_sync_v2",
+    "phase_trajectory_sync_abs_l018": "trajectory_sync_abs_l018",
+    "phase_trajectory_sync_v2_l008": "trajectory_sync_v2_l008",
+    "phase_trajectory_sync_v2_vel025_snr10": "trajectory_sync_v2_vel025_snr10",
+    "phase_continuation_sync_soft": "phase_continuation_sync_soft",
 }
 MODEL_KEYS: tuple[str, ...] = tuple(CONFIG_TO_MODEL_KEY[name] for name in EVAL_CONFIG_NAMES)
 PHASE_MODEL_KEYS: tuple[str, ...] = tuple(key for key in MODEL_KEYS if key != "vanilla")
 SYNC_CONTINUATION_ABLATION_MODEL_KEYS: tuple[str, ...] = tuple(
     CONFIG_TO_MODEL_KEY[name] for name in SYNC_CONTINUATION_ABLATION_CONFIG_NAMES
+)
+SYNC_HPARAM_EXTRA_MODEL_KEYS: tuple[str, ...] = tuple(
+    CONFIG_TO_MODEL_KEY[name] for name in SYNC_HPARAM_EXTRA_CONFIG_NAMES
+)
+SYNC_HPARAM_SWEEP_MODEL_KEYS: tuple[str, ...] = tuple(
+    CONFIG_TO_MODEL_KEY[name] for name in SYNC_HPARAM_SWEEP_CONFIG_NAMES
 )
 SUMMARY_MODEL_LABELS: dict[str, str] = {
     "vanilla": "Vanilla DP",
@@ -64,6 +86,10 @@ SUMMARY_MODEL_LABELS: dict[str, str] = {
     "phase_continuation": "Phase Continuation",
     "phase_continuation_sync": "Phase Continuation + Sync Loss",
     "phase_continuation_sync_v2": "Phase Continuation + Sync v2",
+    "trajectory_sync_abs_l018": "Strong Absolute Sync (lambda 0.18)",
+    "trajectory_sync_v2_l008": "Soft Sync v2 (lambda 0.08)",
+    "trajectory_sync_v2_vel025_snr10": "Mild Velocity/SNR Sync v2",
+    "phase_continuation_sync_soft": "Soft Phase Continuation Sync",
 }
 CONFIG_USES_PHASE_TRAJECTORY: dict[str, bool] = {
     "vanilla": False,
@@ -74,6 +100,10 @@ CONFIG_USES_PHASE_TRAJECTORY: dict[str, bool] = {
     "phase_continuation": True,
     "phase_continuation_sync": True,
     "phase_continuation_sync_v2": True,
+    "phase_trajectory_sync_abs_l018": True,
+    "phase_trajectory_sync_v2_l008": True,
+    "phase_trajectory_sync_v2_vel025_snr10": True,
+    "phase_continuation_sync_soft": True,
 }
 
 
@@ -411,6 +441,10 @@ PHASE_CONDITION_LABELS: dict[str, str] = {
     "phase_continuation": "phase + phase advance condition",
     "phase_continuation_sync": "phase continuation + sync loss",
     "phase_continuation_sync_v2": "phase continuation + velocity/SNR sync loss",
+    "trajectory_sync_abs_l018": "full phase trajectory + stronger sync loss",
+    "trajectory_sync_v2_l008": "full phase trajectory + softer velocity/SNR sync loss",
+    "trajectory_sync_v2_vel025_snr10": "full phase trajectory + mild velocity/SNR sync loss",
+    "phase_continuation_sync_soft": "phase continuation + softer sync loss",
 }
 
 

@@ -333,7 +333,7 @@ EXPERIMENT_CONFIGS: dict[VariantName, ExperimentConfig] = {
         training=_BASE_TRAINING,
         evaluation=_BASE_EVALUATION,
         artifacts=ArtifactConfig(
-            checkpoint_name="phase_trajectory_sync_v2_vel0.25_snr10_lambda0.12.pt",
+            checkpoint_name="phase_trajectory_sync_vel0.5_snr5_lambda0.12.pt",
             loss_plot_name="phase_trajectory_sync_v2_loss.png",
         ),
         tags=("phase", "per-step-cond", "sync-v2", "ablation"),
@@ -384,7 +384,7 @@ EXPERIMENT_CONFIGS: dict[VariantName, ExperimentConfig] = {
         training=_BASE_TRAINING,
         evaluation=_BASE_EVALUATION,
         artifacts=ArtifactConfig(
-            checkpoint_name="phase_continuation_sync_v2_vel0.25_snr10_lambda0.12.pt",
+            checkpoint_name="phase_continuation_sync_v2_vel0.5_snr5_lambda0.12.pt",
             loss_plot_name="phase_continuation_sync_v2_loss.png",
         ),
         tags=("phase", "phase-continuation", "sync-v2", "ablation"),
